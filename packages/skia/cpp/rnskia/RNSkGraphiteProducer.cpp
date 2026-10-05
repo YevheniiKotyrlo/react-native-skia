@@ -2,6 +2,7 @@
 // RNSkGraphiteProducer.h (which the view headers include on their own).
 #include "RNSkGraphiteProducer.h"
 
+#include <chrono>
 #include <memory>
 #include <utility>
 
@@ -142,6 +143,10 @@ void RNSkGraphiteProducer::kickLocked() {
 }
 
 void RNSkGraphiteProducer::produce() {
+  const auto jobStartNanos =
+      std::chrono::duration_cast<std::chrono::nanoseconds>(
+          std::chrono::steady_clock::now().time_since_epoch())
+          .count();
   std::shared_ptr<RNSkGraphiteTarget> target;
   std::shared_ptr<Recorder> recorder;
   sk_sp<SkPicture> picture;
@@ -184,6 +189,12 @@ void RNSkGraphiteProducer::produce() {
     // lock: a frame presented in between (a redraw replaying the last one)
     // would otherwise clear the flag before the recording is even queued.
     _presentPending = true;
+    RNSkLogger::logToConsole(
+        "SKIA_JOB start=%lld submit=%lld", static_cast<long long>(jobStartNanos),
+        static_cast<long long>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now().time_since_epoch())
+                .count()));
     target->submit(std::move(recording));
     return;
   }

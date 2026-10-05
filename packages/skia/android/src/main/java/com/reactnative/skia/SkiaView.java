@@ -162,10 +162,14 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
      * Presents the queued recordings on the next vsync. Main thread; called
      * from native when a recording is submitted.
      */
+    private long mPostedAtNanos = 0;
+    private long mLastFrameTimeNanos = 0;
+
     @DoNotStrip
     public void scheduleFrame() {
         if (!mFramePending) {
             mFramePending = true;
+            mPostedAtNanos = System.nanoTime();
             Choreographer.getInstance().postFrameCallback(this);
         }
     }
@@ -173,6 +177,8 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
     @Override
     public void doFrame(long frameTimeNanos) {
         mFramePending = false;
+        Log.i("SKIA_PACE", "frame=" + frameTimeNanos + " posted=" + mPostedAtNanos + " previousFrame=" + mLastFrameTimeNanos + " entered=" + System.nanoTime());
+        mLastFrameTimeNanos = frameTimeNanos;
         if (presentFrame()) {
             scheduleFrame();
         }

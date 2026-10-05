@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -273,6 +274,26 @@ public:
    it appears.
    */
   bool presentFrame() {
+    static int probeTicks = 0;
+    static int probeEmpty = 0;
+    static int probeFailed = 0;
+    static int probePresented = 0;
+    static size_t probeRecordings = 0;
+    static auto probeStart = std::chrono::steady_clock::now();
+    auto reportProbe = [&]() {
+      auto elapsed = std::chrono::steady_clock::now() - probeStart;
+      if (elapsed < std::chrono::seconds(1)) {
+        return;
+      }
+      RNSkLogger::logToConsole(
+          "FRAME_PROBE ticks=%d empty=%d failed=%d presented=%d recordings=%zu",
+          probeTicks, probeEmpty, probeFailed, probePresented,
+          probeRecordings);
+      probeTicks = probeEmpty = probeFailed = probePresented = 0;
+      probeRecordings = 0;
+      probeStart = std::chrono::steady_clock::now();
+    };
+    probeTicks++;
     auto target = getTarget();
     if (target == nullptr) {
       return false;
@@ -283,13 +304,20 @@ public:
     }
     auto recordings = target->takeQueued();
     if (recordings.empty()) {
+      probeEmpty++;
+      reportProbe();
       return false;
     }
+    probeRecordings += recordings.size();
     if (!present(_canvasProvider, targetInfo, recordings,
                  /* remember= */ true)) {
       target->requeue(recordings);
+      probeFailed++;
+      reportProbe();
       return true;
     }
+    probePresented++;
+    reportProbe();
     _producer->onFramePresented();
     return target->hasQueued();
   }
