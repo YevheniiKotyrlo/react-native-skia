@@ -132,6 +132,7 @@ private:
   bool _presentPending = false;
 
   void recordProbeJobLocked(double replayMs);
+  int _waitingRecordings = 0;
   size_t _probeId = 0;
   std::chrono::steady_clock::time_point _probeWindowStart{};
   int _probeJobs = 0;

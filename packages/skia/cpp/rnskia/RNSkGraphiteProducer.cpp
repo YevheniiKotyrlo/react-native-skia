@@ -18,7 +18,27 @@
 #include "include/core/SkCanvas.h"
 #include "include/core/SkPicture.h"
 
+#if defined(__ANDROID__)
+#include <sys/system_properties.h>
+#else
+#include <cstdlib>
+#endif
+
 namespace RNSkia {
+
+static bool probePipelining() {
+  static const bool enabled = [] {
+#if defined(__ANDROID__)
+    char value[PROP_VALUE_MAX] = {0};
+    __system_property_get("debug.rnskia.pipeline", value);
+    return value[0] == '1';
+#else
+    const char *value = std::getenv("SKIA_PROBE_PIPELINE");
+    return value != nullptr && value[0] == '1';
+#endif
+  }();
+  return enabled;
+}
 
 RNSkGraphiteProducer::~RNSkGraphiteProducer() = default;
 
@@ -136,9 +156,10 @@ void RNSkGraphiteProducer::recordProbeJobLocked(double replayMs) {
     char line[224];
     snprintf(line, sizeof(line),
              "SkiaProbe producer view=%zu window_s=%.3f jobs=%d updates=%d "
-             "replay_ms_mean=%.2f replay_ms_max=%.2f",
+             "replay_ms_mean=%.2f replay_ms_max=%.2f pipeline=%d",
              _probeId, elapsed, _probeJobs, _probeUpdates,
-             _probeReplayTotalMs / _probeJobs, _probeReplayMaxMs);
+             _probeReplayTotalMs / _probeJobs, _probeReplayMaxMs,
+             probePipelining() ? 1 : 0);
     RNSkLogger::logToConsole(std::string(line));
     _probeWindowStart = now;
     _probeJobs = 0;
@@ -158,13 +179,16 @@ bool RNSkGraphiteProducer::requestFrame() {
 void RNSkGraphiteProducer::onFramePresented() {
   std::lock_guard<std::mutex> lock(_mutex);
   _presentPending = false;
+  _waitingRecordings = 0;
   if (_dirty) {
     kickLocked();
   }
 }
 
 void RNSkGraphiteProducer::kickLocked() {
-  if (_inFlight || _presentPending || _target == nullptr ||
+  const bool waiting =
+      probePipelining() ? _waitingRecordings >= 2 : _presentPending;
+  if (_inFlight || waiting || _target == nullptr ||
       (_recorder == nullptr && _picture == nullptr)) {
     return;
   }
@@ -225,7 +249,11 @@ void RNSkGraphiteProducer::produce() {
     // lock: a frame presented in between (a redraw replaying the last one)
     // would otherwise clear the flag before the recording is even queued.
     _presentPending = true;
+    _waitingRecordings += 1;
     target->submit(std::move(recording));
+    if (probePipelining() && _dirty) {
+      kickLocked();
+    }
     return;
   }
   // Nothing was recorded: keep the content dirty so that the next request

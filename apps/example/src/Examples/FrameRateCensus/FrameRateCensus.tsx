@@ -14,6 +14,7 @@ interface CensusConfig {
 const PACING_SHAPES = [100, 1000, 2000, 4000, 6000, 8000, 12000, 16000];
 const CANVAS_COUNTS = [1, 2, 4, 8];
 const OPAQUE_CANVAS_COUNTS = [1, 2, 4];
+const OPAQUE_PACING_SHAPES = [4000, 8000, 12000];
 const HOLD_MS = 16000;
 const GRID_COLUMNS = 100;
 const GRID_STEP = 4;
@@ -37,14 +38,21 @@ const CONFIGS: readonly CensusConfig[] = [
     shapes: 1,
     opaque: true,
   })),
+  ...OPAQUE_PACING_SHAPES.map((shapes) => ({
+    name: `opaque-pacing-${shapes}`,
+    canvases: 1,
+    shapes,
+    opaque: true,
+  })),
 ];
 
 interface ShapesSceneProps {
   readonly clock: SharedValue<number>;
   readonly shapes: number;
+  readonly opaque: boolean;
 }
 
-const ShapesScene = ({ clock, shapes }: ShapesSceneProps) => {
+const ShapesScene = ({ clock, shapes, opaque }: ShapesSceneProps) => {
   const positions = useMemo(
     () =>
       Array.from({ length: shapes }, (_, index) => ({
@@ -57,7 +65,7 @@ const ShapesScene = ({ clock, shapes }: ShapesSceneProps) => {
     { translateX: 20 * Math.sin(clock.value / 300) },
   ]);
   return (
-    <Canvas style={styles.fill}>
+    <Canvas style={styles.fill} opaque={opaque}>
       <Fill color="black" />
       <Group transform={transform}>
         {positions.map((position, index) => (
@@ -118,7 +126,11 @@ export const FrameRateCensus = () => {
     <View style={styles.fill} key={config.name}>
       <Text style={styles.label}>{config.name}</Text>
       {config.shapes > 1 ? (
-        <ShapesScene clock={clock} shapes={config.shapes} />
+        <ShapesScene
+          clock={clock}
+          shapes={config.shapes}
+          opaque={config.opaque}
+        />
       ) : (
         Array.from({ length: config.canvases }, (_, canvasIndex) => (
           <CircleCanvas
