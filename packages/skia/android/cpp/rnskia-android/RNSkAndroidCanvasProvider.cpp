@@ -57,6 +57,7 @@ ANativeWindow *RNSkAndroidCanvasProvider::acquireWindow(jobject surface,
 }
 
 void RNSkAndroidCanvasProvider::releaseWindow() {
+  _frameRateVote.detach();
   if (_window == nullptr && _jSurface == nullptr) {
     return;
   }
@@ -121,21 +122,30 @@ bool RNSkAndroidCanvasProvider::presentRecordings(
   if (_surfaceHolder == nullptr) {
     return false;
   }
-  return static_cast<DawnWindowContext *>(_surfaceHolder.get())
-      ->presentRecordings(recordings);
+  const bool presented = static_cast<DawnWindowContext *>(_surfaceHolder.get())
+                             ->presentRecordings(recordings);
+  if (presented) {
+    _frameRateVote.onFramePresented();
+  }
+  return presented;
 }
 
 bool RNSkAndroidCanvasProvider::presentImage(const sk_sp<SkImage> &image) {
   if (_surfaceHolder == nullptr) {
     return false;
   }
-  return static_cast<DawnWindowContext *>(_surfaceHolder.get())
-      ->presentImage(image);
+  const bool presented = static_cast<DawnWindowContext *>(_surfaceHolder.get())
+                             ->presentImage(image);
+  if (presented) {
+    _frameRateVote.onFramePresented();
+  }
+  return presented;
 }
 
 void RNSkAndroidCanvasProvider::surfaceAvailable(jobject surface, int width,
                                                  int height, bool isSurface,
-                                                 bool highBitDepth) {
+                                                 bool highBitDepth,
+                                                 float maxRefreshRate) {
   // Release the old surface and its window
   _surfaceHolder = nullptr;
   releaseWindow();
@@ -145,6 +155,11 @@ void RNSkAndroidCanvasProvider::surfaceAvailable(jobject surface, int width,
     RNSkLogger::logToConsole("Could not acquire the native window");
     releaseWindow();
     return;
+  }
+  if (isSurface) {
+    // Only a SurfaceView votes: a TextureView is composited into its window,
+    // which casts its own vote.
+    _frameRateVote.attach(window, maxRefreshRate);
   }
   _surfaceHolder = DawnContext::getInstance().MakeWindow(window, width, height,
                                                          highBitDepth);
@@ -164,7 +179,8 @@ void RNSkAndroidCanvasProvider::surfaceDestroyed() {
 
 void RNSkAndroidCanvasProvider::surfaceSizeChanged(jobject jSurface, int width,
                                                    int height, bool isSurface,
-                                                   bool highBitDepth) {
+                                                   bool highBitDepth,
+                                                   float maxRefreshRate) {
   if (width == 0 && height == 0) {
     // Setting width/height to zero is nothing we need to care about when
     // it comes to invalidating the surface.
@@ -172,7 +188,8 @@ void RNSkAndroidCanvasProvider::surfaceSizeChanged(jobject jSurface, int width,
   }
 
   if (_surfaceHolder == nullptr) {
-    surfaceAvailable(jSurface, width, height, isSurface, highBitDepth);
+    surfaceAvailable(jSurface, width, height, isSurface, highBitDepth,
+                     maxRefreshRate);
   } else {
     _surfaceHolder->resize(width, height);
     updateTargetInfo();

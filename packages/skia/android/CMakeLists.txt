@@ -60,6 +60,7 @@ add_library(
 
         "${PROJECT_SOURCE_DIR}/cpp/jni/JniPlatformContext.cpp"
         "${PROJECT_SOURCE_DIR}/cpp/rnskia-android/RNSkAndroidCanvasProvider.cpp"
+        "${PROJECT_SOURCE_DIR}/cpp/rnskia-android/SurfaceFrameRateVote.cpp"
         "${PROJECT_SOURCE_DIR}/cpp/rnskia-android/AHardwareBufferUtils.cpp"
         "${PROJECT_SOURCE_DIR}/cpp/rnskia-android/RNSkAndroidVideo.cpp"
 

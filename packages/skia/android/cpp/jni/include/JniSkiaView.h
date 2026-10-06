@@ -49,16 +49,17 @@ public:
 
 protected:
   void surfaceAvailable(jobject surface, int width, int height, bool isSurface,
-                        bool highBitDepth) {
-    _provider->surfaceAvailable(surface, width, height, isSurface,
-                                highBitDepth);
+                        bool highBitDepth, float maxRefreshRate) {
+    _provider->surfaceAvailable(surface, width, height, isSurface, highBitDepth,
+                                maxRefreshRate);
     _view->redraw();
   }
 
   void surfaceSizeChanged(jobject surface, int width, int height,
-                          bool isSurface, bool highBitDepth) {
+                          bool isSurface, bool highBitDepth,
+                          float maxRefreshRate) {
     _provider->surfaceSizeChanged(surface, width, height, isSurface,
-                                  highBitDepth);
+                                  highBitDepth, maxRefreshRate);
     // Paint the new size right away rather than on the next scheduled redraw.
     _view->redraw();
   }
