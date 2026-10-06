@@ -1,5 +1,7 @@
 #pragma once
 
+#include <chrono>
+#include <cstddef>
 #include <memory>
 #include <mutex>
 
@@ -93,6 +95,8 @@ public:
   /** The view presented a frame: the next one may start. */
   void onFramePresented();
 
+  void setProbeId(size_t probeId);
+
   /**
    Replays the current content into a canvas, on the calling thread (a
    snapshot). The canvas draws in pixels, this applies the density.
@@ -126,6 +130,14 @@ private:
   bool _dirty = false;
   bool _inFlight = false;
   bool _presentPending = false;
+
+  void recordProbeJobLocked(double replayMs);
+  size_t _probeId = 0;
+  std::chrono::steady_clock::time_point _probeWindowStart{};
+  int _probeJobs = 0;
+  int _probeUpdates = 0;
+  double _probeReplayTotalMs = 0;
+  double _probeReplayMaxMs = 0;
 };
 
 } // namespace RNSkia

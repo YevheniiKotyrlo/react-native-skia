@@ -2,7 +2,11 @@
 // RNSkGraphiteProducer.h (which the view headers include on their own).
 #include "RNSkGraphiteProducer.h"
 
+#include <algorithm>
+#include <chrono>
+#include <cstdio>
 #include <memory>
+#include <string>
 #include <utility>
 
 #include "RNSkGraphiteTarget.h"
@@ -107,9 +111,41 @@ bool RNSkGraphiteProducer::applyUpdates(jsi::Runtime &runtime,
     return false;
   }
   std::lock_guard<std::mutex> lock(_mutex);
+  _probeUpdates += 1;
   _dirty = true;
   kickLocked();
   return true;
+}
+
+void RNSkGraphiteProducer::setProbeId(size_t probeId) {
+  std::lock_guard<std::mutex> lock(_mutex);
+  _probeId = probeId;
+}
+
+void RNSkGraphiteProducer::recordProbeJobLocked(double replayMs) {
+  const auto now = std::chrono::steady_clock::now();
+  if (_probeWindowStart.time_since_epoch().count() == 0) {
+    _probeWindowStart = now;
+  }
+  _probeJobs += 1;
+  _probeReplayTotalMs += replayMs;
+  _probeReplayMaxMs = std::max(_probeReplayMaxMs, replayMs);
+  const double elapsed =
+      std::chrono::duration<double>(now - _probeWindowStart).count();
+  if (elapsed >= 1.0) {
+    char line[224];
+    snprintf(line, sizeof(line),
+             "SkiaProbe producer view=%zu window_s=%.3f jobs=%d updates=%d "
+             "replay_ms_mean=%.2f replay_ms_max=%.2f",
+             _probeId, elapsed, _probeJobs, _probeUpdates,
+             _probeReplayTotalMs / _probeJobs, _probeReplayMaxMs);
+    RNSkLogger::logToConsole(std::string(line));
+    _probeWindowStart = now;
+    _probeJobs = 0;
+    _probeUpdates = 0;
+    _probeReplayTotalMs = 0;
+    _probeReplayMaxMs = 0;
+  }
 }
 
 bool RNSkGraphiteProducer::requestFrame() {
@@ -142,6 +178,7 @@ void RNSkGraphiteProducer::kickLocked() {
 }
 
 void RNSkGraphiteProducer::produce() {
+  const auto jobStart = std::chrono::steady_clock::now();
   std::shared_ptr<RNSkGraphiteTarget> target;
   std::shared_ptr<Recorder> recorder;
   sk_sp<SkPicture> picture;
@@ -177,9 +214,13 @@ void RNSkGraphiteProducer::produce() {
       }
     }
   }
+  const double replayMs = std::chrono::duration<double, std::milli>(
+                              std::chrono::steady_clock::now() - jobStart)
+                              .count();
   std::lock_guard<std::mutex> lock(_mutex);
   _inFlight = false;
   if (recording != nullptr) {
+    recordProbeJobLocked(replayMs);
     // The next job starts when this frame is on screen. Submitted under the
     // lock: a frame presented in between (a redraw replaying the last one)
     // would otherwise clear the flag before the recording is even queued.

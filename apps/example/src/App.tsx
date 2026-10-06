@@ -37,6 +37,7 @@ import {
   Graphite,
   GraphiteCanvasExample,
   AndroidViews,
+  FrameRateCensus,
 } from "./Examples";
 import { CI, Tests } from "./Tests";
 import { HomeScreen } from "./Home";
@@ -86,9 +87,11 @@ const linking: LinkingOptions<StackParamList> = {
       Graphite: "graphite",
       GraphiteCanvas: "graphite-canvas",
       AndroidViews: "android-views",
+      FrameRateCensus: "frame-rate-census",
     },
   },
   prefixes: ["rnskia://"],
+  getInitialURL: () => Promise.resolve("rnskia://frame-rate-census"),
 };
 
 const HeaderLeft = (props: HeaderBackButtonProps) => {
@@ -248,6 +251,7 @@ const App = () => {
               component={GraphiteCanvasExample}
             />
             <Stack.Screen name="AndroidViews" component={AndroidViews} />
+            <Stack.Screen name="FrameRateCensus" component={FrameRateCensus} />
           </Stack.Navigator>
         </NavigationContainer>
       </GestureHandlerRootView>

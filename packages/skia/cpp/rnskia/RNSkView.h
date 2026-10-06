@@ -1,6 +1,8 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
+#include <cstdio>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -80,6 +82,7 @@ public:
    */
   void setNativeId(size_t nativeId) {
     _nativeId = nativeId;
+    _producer->setProbeId(nativeId);
     std::shared_ptr<RNSkGraphiteTarget> previous;
     {
       std::lock_guard<std::mutex> lock(_mutex);
@@ -294,7 +297,28 @@ public:
       return true;
     }
     _producer->onFramePresented();
+    recordProbePresent();
     return target->hasQueued();
+  }
+
+  void recordProbePresent() {
+    const auto now = std::chrono::steady_clock::now();
+    if (_probeWindowStart.time_since_epoch().count() == 0) {
+      _probeWindowStart = now;
+    }
+    _probePresents += 1;
+    const double elapsed =
+        std::chrono::duration<double>(now - _probeWindowStart).count();
+    if (elapsed >= 1.0) {
+      char line[160];
+      snprintf(line, sizeof(line),
+               "SkiaProbe view=%zu window_s=%.3f presents=%d "
+               "presents_per_s=%.1f",
+               _nativeId, elapsed, _probePresents, _probePresents / elapsed);
+      RNSkLogger::logToConsole(std::string(line));
+      _probeWindowStart = now;
+      _probePresents = 0;
+    }
   }
 
   bool hasQueuedRecordings() {
@@ -440,6 +464,8 @@ private:
   std::shared_ptr<RNSkCanvasProvider> _canvasProvider;
   std::shared_ptr<RNSkGraphiteProducer> _producer;
   size_t _nativeId = 0;
+  std::chrono::steady_clock::time_point _probeWindowStart{};
+  int _probePresents = 0;
   std::function<void()> _frameScheduler;
   std::atomic<bool> _redrawRequested = {false};
 
