@@ -59,7 +59,6 @@ add_library(
         "${PROJECT_SOURCE_DIR}/cpp/jni/JniSkiaManager.cpp"
 
         "${PROJECT_SOURCE_DIR}/cpp/jni/JniPlatformContext.cpp"
-        "${PROJECT_SOURCE_DIR}/cpp/rnskia-android/RNSkAndroidCanvasProvider.cpp"
         "${PROJECT_SOURCE_DIR}/cpp/rnskia-android/SurfaceFrameRateVote.cpp"
 
         "${PROJECT_SOURCE_DIR}/../cpp/jsi/JSICache.cpp"
@@ -69,7 +68,7 @@ add_library(
 
         "${PROJECT_SOURCE_DIR}/../cpp/rnskia/RNSkManager.cpp"
         "${PROJECT_SOURCE_DIR}/../cpp/rnskia/RNSkGraphiteProducer.cpp"
-        "${PROJECT_SOURCE_DIR}/../cpp/rnskia/RNDawnWindowContext.cpp"
+        "${PROJECT_SOURCE_DIR}/../cpp/rnskia/RNSkWindowSurface.cpp"
         "${PROJECT_SOURCE_DIR}/../cpp/rnskia/RNDawnInterop.cpp"
 
         "${PROJECT_SOURCE_DIR}/../cpp/api/third_party/CSSColorParser.cpp"
