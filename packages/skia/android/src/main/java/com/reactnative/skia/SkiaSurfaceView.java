@@ -78,6 +78,12 @@ public class SkiaSurfaceView extends SurfaceView implements SurfaceHolder.Callba
         mDrawGate.onFirstFramePresented();
     }
 
+    // The renderer moved to another view: this one keeps its last frame on screen
+    // until it is removed, and reports nothing.
+    void detachFromRenderer() {
+        mApi = SkiaViewAPI.DETACHED;
+    }
+
     private void releaseSurface() {
         mDrawGate.onSurfaceReleased();
         mApi.onSurfaceDestroyed();

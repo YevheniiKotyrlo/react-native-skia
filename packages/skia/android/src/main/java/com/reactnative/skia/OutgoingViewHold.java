@@ -4,12 +4,12 @@ import androidx.annotation.Nullable;
 
 /**
  * Keeps the view a SkiaView replaced on screen until the new one shows the
- * canvas: the outgoing view stays above the new one until the new view has
- * presented its first frame and a window frame drawn after that has
- * committed, so the new view is on screen beneath it before it leaves. A
- * first frame that does not come within FirstFrameDrawGate's wait is not
- * waited for, as the window does not wait for it either. Another swap, or
- * the SkiaView leaving its window, removes the view at once. Main thread.
+ * canvas: the outgoing view stays until the new view has shown a frame and a
+ * window frame drawn after that has committed, so the new view is on screen
+ * before the outgoing one leaves. A frame that does not come within
+ * FirstFrameDrawGate's wait is not waited for, as the window does not wait for
+ * it either. Another swap, or the SkiaView leaving its window, removes the view
+ * at once. Main thread.
  */
 final class OutgoingViewHold<V> {
     /** What the hold asks of the view that owns it. */
@@ -31,6 +31,7 @@ final class OutgoingViewHold<V> {
     private final Runnable mFirstFrameDeadline = this::release;
     @Nullable
     private V mHeld;
+    private boolean mReleaseScheduled = false;
 
     OutgoingViewHold(Host<V> host) {
         mHost = host;
@@ -56,15 +57,17 @@ final class OutgoingViewHold<V> {
         }
         V view = mHeld;
         mHeld = null;
+        mReleaseScheduled = false;
         mHost.removeCallbacks(mFirstFrameDeadline);
         mHost.removeView(view);
     }
 
-    /** The new view presented its first frame. */
+    /** The new view showed a frame. Reported again with every later frame, which changes nothing. */
     void onFirstFramePresented() {
-        if (mHeld == null) {
+        if (mHeld == null || mReleaseScheduled) {
             return;
         }
+        mReleaseScheduled = true;
         mHost.removeCallbacks(mFirstFrameDeadline);
         V view = mHeld;
         mHost.runAfterWindowFrameCommits(() -> {

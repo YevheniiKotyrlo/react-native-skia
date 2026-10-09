@@ -34,24 +34,33 @@ public class BackingViewKindTest {
     }
 
     @Test
+    public void textureViewKeepsAnOutgoingSurfaceViewOnScreenUntilItsFirstFrame() {
+        assertTrue(BackingViewKind.TEXTURE_VIEW.keepsOutgoingUntilFirstFrame(BackingViewKind.SURFACE_VIEW, true, 260, 200));
+    }
+
+    @Test
     public void nothingIsKeptForACanvasThatIsNotShown() {
         assertFalse(BackingViewKind.SURFACE_VIEW.keepsOutgoingUntilFirstFrame(BackingViewKind.TEXTURE_VIEW, false, 260, 200));
+        assertFalse(BackingViewKind.TEXTURE_VIEW.keepsOutgoingUntilFirstFrame(BackingViewKind.SURFACE_VIEW, false, 260, 200));
     }
 
     @Test
     public void nothingIsKeptForACanvasWithoutASize() {
         assertFalse(BackingViewKind.SURFACE_VIEW.keepsOutgoingUntilFirstFrame(BackingViewKind.TEXTURE_VIEW, true, 0, 200));
         assertFalse(BackingViewKind.SURFACE_VIEW.keepsOutgoingUntilFirstFrame(BackingViewKind.TEXTURE_VIEW, true, 260, 0));
+        assertFalse(BackingViewKind.TEXTURE_VIEW.keepsOutgoingUntilFirstFrame(BackingViewKind.SURFACE_VIEW, true, 0, 200));
+        assertFalse(BackingViewKind.TEXTURE_VIEW.keepsOutgoingUntilFirstFrame(BackingViewKind.SURFACE_VIEW, true, 260, 0));
     }
 
     @Test
-    public void anOutgoingSurfaceViewIsNotKept() {
+    public void nothingIsKeptWhenTheKindStaysTheSame() {
         assertFalse(BackingViewKind.SURFACE_VIEW.keepsOutgoingUntilFirstFrame(BackingViewKind.SURFACE_VIEW, true, 260, 200));
+        assertFalse(BackingViewKind.TEXTURE_VIEW.keepsOutgoingUntilFirstFrame(BackingViewKind.TEXTURE_VIEW, true, 260, 200));
     }
 
     @Test
-    public void textureViewKeepsNothing() {
-        assertFalse(BackingViewKind.TEXTURE_VIEW.keepsOutgoingUntilFirstFrame(BackingViewKind.SURFACE_VIEW, true, 260, 200));
-        assertFalse(BackingViewKind.TEXTURE_VIEW.keepsOutgoingUntilFirstFrame(BackingViewKind.TEXTURE_VIEW, true, 260, 200));
+    public void textureViewGoesAboveTheOutgoingViewAndSurfaceViewBeneathIt() {
+        assertTrue(BackingViewKind.TEXTURE_VIEW.coversOutgoing());
+        assertFalse(BackingViewKind.SURFACE_VIEW.coversOutgoing());
     }
 }

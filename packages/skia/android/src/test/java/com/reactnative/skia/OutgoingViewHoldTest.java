@@ -116,6 +116,27 @@ public class OutgoingViewHoldTest {
     }
 
     @Test
+    public void framesReportedAfterTheFirstScheduleNothingMore() {
+        mHold.hold("surface");
+        mHold.onFirstFramePresented();
+        mHold.onFirstFramePresented();
+        mHold.onFirstFramePresented();
+        assertEquals(1, mHost.afterFrameCommit.size());
+    }
+
+    @Test
+    public void aNewHoldWaitsForItsOwnFrame() {
+        mHold.hold("first");
+        mHold.onFirstFramePresented();
+        mHold.hold("second");
+        mHold.onFirstFramePresented();
+        assertEquals(2, mHost.afterFrameCommit.size());
+
+        mHost.commitWindowFrame();
+        assertEquals(Arrays.asList("first", "second"), mHost.removed);
+    }
+
+    @Test
     public void nothingHeldMeansNothingScheduledOrRemoved() {
         mHold.onFirstFramePresented();
         mHold.release();

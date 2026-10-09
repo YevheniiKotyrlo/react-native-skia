@@ -38,17 +38,28 @@ enum BackingViewKind {
     }
 
     /**
-     * Whether a new view of this kind, replacing an outgoing one, keeps that
-     * view on screen until the new one presents its first frame. A SurfaceView
-     * shows nothing before then, while an outgoing TextureView leaves with the
-     * window frame that removes it, so swapping a canvas on screen would show
-     * what lies under it in between. An outgoing SurfaceView is not kept: on
-     * Android 10 its layer leaves as it detaches, whatever the window draws.
+     * Whether a new view of this kind, replacing an outgoing view of the other
+     * kind on a shown, laid-out canvas, keeps the outgoing one until the new
+     * one shows a frame. A SurfaceView shows nothing before its first frame,
+     * while an outgoing TextureView leaves with the window frame that removes
+     * it; and on Android 10 an outgoing SurfaceView's layer leaves as the view
+     * detaches, ahead of the window frame that closes its hole.
      */
     boolean keepsOutgoingUntilFirstFrame(BackingViewKind outgoing, boolean shown, int width, int height) {
+        return outgoing != this && shown && width > 0 && height > 0;
+    }
+
+    /**
+     * Whether a new view of this kind goes above the outgoing view it replaces.
+     * A TextureView paints into the window, so above an outgoing SurfaceView it
+     * covers that view's hole; a SurfaceView behind the window shows only
+     * through its own hole, so it goes beneath an outgoing TextureView, which
+     * covers it until that hole opens.
+     */
+    boolean coversOutgoing() {
         return switch (this) {
-            case SURFACE_VIEW -> outgoing == TEXTURE_VIEW && shown && width > 0 && height > 0;
-            case TEXTURE_VIEW -> false;
+            case SURFACE_VIEW -> false;
+            case TEXTURE_VIEW -> true;
         };
     }
 }
