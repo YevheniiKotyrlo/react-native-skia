@@ -8,9 +8,10 @@ import android.view.SurfaceView;
 import androidx.annotation.NonNull;
 
 @SuppressLint("ViewConstructor")
-public class SkiaSurfaceView extends SurfaceView implements SurfaceHolder.Callback {
+public class SkiaSurfaceView extends SurfaceView implements SurfaceHolder.Callback2 {
 
     SkiaViewAPI mApi;
+    private final FirstFrameDrawGate mDrawGate = new FirstFrameDrawGate();
 
     public SkiaSurfaceView(Context context, SkiaViewAPI api, boolean zOrderOnTop, boolean opaque) {
         super(context);
@@ -29,12 +30,14 @@ public class SkiaSurfaceView extends SurfaceView implements SurfaceHolder.Callba
 
     @Override
     protected void onDetachedFromWindow() {
+        mDrawGate.onDetachedFromWindow();
         super.onDetachedFromWindow();
-        mApi.onSurfaceDestroyed();
+        releaseSurface();
     }
 
     @Override
     public void surfaceCreated(@NonNull SurfaceHolder holder) {
+        mDrawGate.onSurfaceCreated();
         mApi.onSurfaceCreated(holder.getSurface(), getWidth(), getHeight());
     }
 
@@ -44,7 +47,29 @@ public class SkiaSurfaceView extends SurfaceView implements SurfaceHolder.Callba
     }
 
     @Override
+    public void surfaceRedrawNeeded(@NonNull SurfaceHolder holder) {
+        // Answered in surfaceRedrawNeededAsync, which SurfaceView calls instead.
+    }
+
+    // The draw is reported finished once a frame is in the surface: see
+    // FirstFrameDrawGate. GLSurfaceView holds this runnable the same way.
+    @Override
+    public void surfaceRedrawNeededAsync(@NonNull SurfaceHolder holder, @NonNull Runnable drawingFinished) {
+        mDrawGate.onRedrawNeeded(drawingFinished);
+    }
+
+    @Override
     public void surfaceDestroyed(@NonNull SurfaceHolder holder) {
+        releaseSurface();
+    }
+
+    /** A frame was presented into the surface. Main thread. */
+    void onFirstFramePresented() {
+        mDrawGate.onFirstFramePresented();
+    }
+
+    private void releaseSurface() {
+        mDrawGate.onSurfaceReleased();
         mApi.onSurfaceDestroyed();
     }
 }

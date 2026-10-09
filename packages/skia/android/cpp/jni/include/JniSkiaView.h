@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <memory>
 
 #include <android/native_window.h>
@@ -79,6 +80,7 @@ protected:
   }
 
   void surfaceDestroyed() {
+    _awaitingFirstFrame->store(false);
     _frameRateVote->detach();
     _surface->detach();
   }
@@ -126,17 +128,28 @@ private:
       : _manager(skiaManager->cthis()->getSkiaManager()) {
     auto context = skiaManager->cthis()->getPlatformContext();
     _surface = std::make_shared<RNSkWindowSurface>();
-    // Weak: the surface is shared with the view and can outlive this object.
-    std::weak_ptr<SurfaceFrameRateVote> weakVote = _frameRateVote;
-    _surface->setDidPresent([weakVote]() {
-      if (auto vote = weakVote.lock()) {
-        vote->onFramePresented();
-      }
-    });
-    _view = std::make_shared<RNSkView>(context, _surface);
-    // A submitted recording arms the Java view's frame callback. Weak: the
-    // Java view owns this object through its hybrid data.
+    // Weak: the Java view owns this object through its hybrid data, and the
+    // surface is shared with the view and can outlive this object.
     jni::weak_ref<jhybridobject> weakJava = jni::make_weak(jThis);
+    std::weak_ptr<SurfaceFrameRateVote> weakVote = _frameRateVote;
+    _surface->setDidPresent(
+        [weakVote, weakJava, awaitingFirstFrame = _awaitingFirstFrame]() {
+          if (auto vote = weakVote.lock()) {
+            vote->onFramePresented();
+          }
+          if (!awaitingFirstFrame->exchange(false)) {
+            return;
+          }
+          auto javaPart = weakJava.lockLocal();
+          if (!javaPart) {
+            return;
+          }
+          static const auto method =
+              javaPart->getClass()->getMethod<void()>("onFirstFramePresented");
+          method(javaPart);
+        });
+    _view = std::make_shared<RNSkView>(context, _surface);
+    // A submitted recording arms the Java view's frame callback.
     _view->setFrameScheduler([weakJava]() {
       auto javaPart = weakJava.lockLocal();
       if (!javaPart) {
@@ -190,6 +203,9 @@ private:
       // which casts its own vote.
       _frameRateVote->attach(window, maxRefreshRate);
     }
+    // A SurfaceView waits for its first frame before it lets the window show
+    // the surface (SkiaSurfaceView.surfaceRedrawNeededAsync).
+    _awaitingFirstFrame->store(isSurface);
     _surface->attach(window, width, height, highBitDepth,
                      /* useP3ColorSpace= */ false,
                      [ownedSurface](void *nativeHandle) {
@@ -222,6 +238,9 @@ private:
   std::weak_ptr<RNSkManager> _manager;
   std::shared_ptr<SurfaceFrameRateVote> _frameRateVote =
       std::make_shared<SurfaceFrameRateVote>();
+  // Set when a SurfaceView's window is attached, cleared by its first present.
+  std::shared_ptr<std::atomic<bool>> _awaitingFirstFrame =
+      std::make_shared<std::atomic<bool>>(false);
   // Declared before the view, which unbinds itself from the surface when it
   // is destroyed.
   std::shared_ptr<RNSkWindowSurface> _surface;

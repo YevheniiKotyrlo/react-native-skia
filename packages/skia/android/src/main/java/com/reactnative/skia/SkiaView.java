@@ -2,6 +2,7 @@ package com.reactnative.skia;
 
 import android.content.Context;
 import android.graphics.SurfaceTexture;
+import android.os.Build;
 import android.util.Log;
 import android.view.Choreographer;
 import android.view.Display;
@@ -30,6 +31,9 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
     private HybridData mHybridData;
 
     private View mView;
+    // Kept above mView until mView presents its first frame, see updateView().
+    @Nullable
+    private SkiaTextureView mOutgoingView;
 
     // Props, applied together in updateView(). A null kind is "auto".
     private boolean mOpaque = false;
@@ -64,6 +68,10 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
 
     public SkiaView(Context context) {
         super(context);
+        // ReactViewGroup lets its children draw past its bounds. Up to Android 11
+        // a SurfaceView behind the window punches its hole by clearing all its
+        // clip allows, which without this clip is the window around the canvas.
+        setClipChildren(true);
         RNSkiaModule skiaModule = ((ReactContext) context).getNativeModule(RNSkiaModule.class);
         mHybridData = initHybrid(skiaModule.getSkiaManager());
     }
@@ -130,8 +138,14 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
                 || kind != mAppliedKind
                 || zOrderOnTop != mAppliedZOrderOnTop
                 || highBitDepth != mAppliedHighBitDepth) {
+            removeOutgoingView();
             if (mView != null) {
-                removeView(mView);
+                if (kind.keepsOutgoingUntilFirstFrame(mAppliedKind, isShown(), getWidth(), getHeight())) {
+                    mOutgoingView = (SkiaTextureView) mView;
+                    mOutgoingView.detachFromRenderer();
+                } else {
+                    removeView(mView);
+                }
             }
             mAppliedKind = kind;
             mAppliedZOrderOnTop = zOrderOnTop;
@@ -140,7 +154,8 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
                 case SURFACE_VIEW -> new SkiaSurfaceView(getContext(), this, zOrderOnTop, mOpaque);
                 case TEXTURE_VIEW -> new SkiaTextureView(getContext(), this, mOpaque);
             };
-            addView(mView);
+            // Beneath an outgoing view, which covers it until its first frame.
+            addView(mView, 0);
             // React Native sizes native children explicitly through onLayout, so
             // the requestLayout triggered by addView is ignored; size the new
             // child ourselves or it stays 0x0 and never gets a surface.
@@ -195,9 +210,47 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
         if (mView != null) {
             mView.layout(0, 0, right - left, bottom - top);
         }
+        if (mOutgoingView != null) {
+            mOutgoingView.layout(0, 0, right - left, bottom - top);
+        }
+    }
+
+    private void removeOutgoingView() {
+        if (mOutgoingView != null) {
+            removeView(mOutgoingView);
+            mOutgoingView = null;
+        }
     }
 
     // Frames --------------------------------------------------------------
+
+    /** The first frame was presented into a SurfaceView's surface. Main thread; called from native. */
+    @DoNotStrip
+    public void onFirstFramePresented() {
+        if (mView instanceof SkiaSurfaceView) {
+            ((SkiaSurfaceView) mView).onFirstFramePresented();
+        }
+        removeOutgoingViewAfterNextWindowFrame();
+    }
+
+    // The window punches the new view's hole in the frame it draws next, under
+    // the outgoing view, which leaves once that frame has committed.
+    private void removeOutgoingViewAfterNextWindowFrame() {
+        if (mOutgoingView == null) {
+            return;
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            removeOutgoingView();
+            return;
+        }
+        SkiaTextureView outgoing = mOutgoingView;
+        getViewTreeObserver().registerFrameCommitCallback(() -> {
+            if (mOutgoingView == outgoing) {
+                removeOutgoingView();
+            }
+        });
+        invalidate();
+    }
 
     /** A recording was submitted. Main thread; called from native. */
     @DoNotStrip
@@ -220,6 +273,7 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
         Choreographer.getInstance().removeFrameCallback(this);
         removeCallbacks(mPostedPresent);
         mFrameScheduler.cancel();
+        removeOutgoingView();
     }
 
     // A no-op for a dropped view (see dropInstance), which every mounted view
