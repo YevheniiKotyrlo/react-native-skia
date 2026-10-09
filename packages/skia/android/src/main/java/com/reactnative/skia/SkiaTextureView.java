@@ -4,6 +4,7 @@ import android.annotation.SuppressLint;
 import android.content.Context;
 import android.graphics.SurfaceTexture;
 import android.util.Log;
+import android.view.Surface;
 import android.view.TextureView;
 import androidx.annotation.NonNull;
 
@@ -11,6 +12,23 @@ import androidx.annotation.NonNull;
 public class SkiaTextureView extends TextureView implements TextureView.SurfaceTextureListener {
 
     private String tag = "SkiaTextureView";
+
+    private static final SkiaViewAPI DETACHED_API = new SkiaViewAPI() {
+        @Override
+        public void onSurfaceCreated(Surface surface, int width, int height) {}
+
+        @Override
+        public void onSurfaceChanged(Surface surface, int width, int height) {}
+
+        @Override
+        public void onSurfaceTextureCreated(SurfaceTexture surface, int width, int height) {}
+
+        @Override
+        public void onSurfaceTextureChanged(SurfaceTexture surface, int width, int height) {}
+
+        @Override
+        public void onSurfaceDestroyed() {}
+    };
 
     SkiaViewAPI mApi;
 
@@ -21,6 +39,12 @@ public class SkiaTextureView extends TextureView implements TextureView.SurfaceT
         // toggled on a live view.
         setOpaque(opaque);
         setSurfaceTextureListener(this);
+    }
+
+    // The renderer moved to another view: this one keeps its last frame on screen
+    // until it is removed, and reports nothing.
+    void detachFromRenderer() {
+        mApi = DETACHED_API;
     }
 
     @Override
