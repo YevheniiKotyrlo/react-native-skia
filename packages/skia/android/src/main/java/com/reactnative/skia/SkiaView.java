@@ -63,6 +63,10 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
 
     public SkiaView(Context context) {
         super(context);
+        // ReactViewGroup lets its children draw past its bounds. Up to Android 11
+        // a SurfaceView behind the window punches its hole by clearing all its
+        // clip allows, which without this clip is the window around the canvas.
+        setClipChildren(true);
         RNSkiaModule skiaModule = ((ReactContext) context).getNativeModule(RNSkiaModule.class);
         mHybridData = initHybrid(skiaModule.getSkiaManager());
     }
@@ -191,6 +195,14 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
     }
 
     // Frames --------------------------------------------------------------
+
+    /** The first frame was presented into a SurfaceView's surface. Main thread; called from native. */
+    @DoNotStrip
+    public void onFirstFramePresented() {
+        if (mView instanceof SkiaSurfaceView) {
+            ((SkiaSurfaceView) mView).onFirstFramePresented();
+        }
+    }
 
     /** A recording was submitted. Main thread; called from native. */
     @DoNotStrip
