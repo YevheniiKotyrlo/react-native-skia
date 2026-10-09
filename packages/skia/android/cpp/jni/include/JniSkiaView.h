@@ -12,6 +12,7 @@
 #include "RNSkLog.h"
 #include "RNSkView.h"
 #include "RNSkWindowSurface.h"
+#include "SurfaceFrameRateVote.h"
 
 namespace RNSkia {
 namespace jni = facebook::jni;
@@ -53,13 +54,15 @@ public:
 
 protected:
   void surfaceAvailable(jobject surface, int width, int height, bool isSurface,
-                        bool highBitDepth) {
-    attachWindow(surface, width, height, isSurface, highBitDepth);
+                        bool highBitDepth, float maxRefreshRate) {
+    attachWindow(surface, width, height, isSurface, highBitDepth,
+                 maxRefreshRate);
     _view->redraw(RNSkView::WindowContent::Nothing);
   }
 
   void surfaceSizeChanged(jobject surface, int width, int height,
-                          bool isSurface, bool highBitDepth) {
+                          bool isSurface, bool highBitDepth,
+                          float maxRefreshRate) {
     auto windowContent = RNSkView::WindowContent::LastFrame;
     // Setting width/height to zero is nothing we need to care about when
     // it comes to invalidating the surface.
@@ -67,7 +70,8 @@ protected:
       if (_surface->isAttached()) {
         _surface->resize(width, height);
       } else {
-        attachWindow(surface, width, height, isSurface, highBitDepth);
+        attachWindow(surface, width, height, isSurface, highBitDepth,
+                     maxRefreshRate);
         windowContent = RNSkView::WindowContent::Nothing;
       }
     }
@@ -77,6 +81,7 @@ protected:
 
   void surfaceDestroyed() {
     _awaitingFirstFrame->store(false);
+    _frameRateVote->detach();
     _surface->detach();
   }
 
@@ -126,8 +131,12 @@ private:
     // Weak: the Java view owns this object through its hybrid data, and the
     // surface is shared with the view and can outlive this object.
     jni::weak_ref<jhybridobject> weakJava = jni::make_weak(jThis);
+    std::weak_ptr<SurfaceFrameRateVote> weakVote = _frameRateVote;
     _surface->setDidPresent(
-        [weakJava, awaitingFirstFrame = _awaitingFirstFrame]() {
+        [weakVote, weakJava, awaitingFirstFrame = _awaitingFirstFrame]() {
+          if (auto vote = weakVote.lock()) {
+            vote->onFramePresented();
+          }
           if (!awaitingFirstFrame->exchange(false)) {
             return;
           }
@@ -158,8 +167,9 @@ private:
    gives it back through the releaser. Android never renders in Display P3.
    */
   void attachWindow(jobject surface, int width, int height, bool isSurface,
-                    bool highBitDepth) {
+                    bool highBitDepth, float maxRefreshRate) {
     // Release the old surface and its window first.
+    _frameRateVote->detach();
     _surface->detach();
     JNIEnv *env = jni::Environment::current();
     jobject jSurface = surface;
@@ -187,6 +197,11 @@ private:
       RNSkLogger::logToConsole("Could not acquire the native window");
       releaseWindow(nullptr, ownedSurface);
       return;
+    }
+    if (isSurface) {
+      // Only a SurfaceView votes: a TextureView is composited into its window,
+      // which casts its own vote.
+      _frameRateVote->attach(window, maxRefreshRate);
     }
     // A SurfaceView waits for its first frame before it lets the window show
     // the surface (SkiaSurfaceView.surfaceRedrawNeededAsync).
@@ -221,6 +236,8 @@ private:
   }
 
   std::weak_ptr<RNSkManager> _manager;
+  std::shared_ptr<SurfaceFrameRateVote> _frameRateVote =
+      std::make_shared<SurfaceFrameRateVote>();
   // Set when a SurfaceView's window is attached, cleared by its first present.
   std::shared_ptr<std::atomic<bool>> _awaitingFirstFrame =
       std::make_shared<std::atomic<bool>>(false);
