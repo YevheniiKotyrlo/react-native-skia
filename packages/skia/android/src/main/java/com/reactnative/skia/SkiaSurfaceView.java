@@ -3,6 +3,7 @@ package com.reactnative.skia;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.graphics.PixelFormat;
+import android.graphics.Region;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import androidx.annotation.NonNull;
@@ -22,6 +23,7 @@ public class SkiaSurfaceView extends SurfaceView implements SurfaceHolder.Callba
             SkiaSurfaceView.this.removeCallbacks(action);
         }
     });
+    private boolean mRetired = false;
 
     public SkiaSurfaceView(Context context, SkiaViewAPI api, boolean zOrderOnTop, boolean opaque) {
         super(context);
@@ -36,6 +38,21 @@ public class SkiaSurfaceView extends SurfaceView implements SurfaceHolder.Callba
     // change on a live surface: SurfaceView reports it through surfaceChanged.
     public void setOpaque(boolean opaque) {
         getHolder().setFormat(opaque ? PixelFormat.OPAQUE : PixelFormat.TRANSLUCENT);
+    }
+
+    // The canvas moved to another view while this one stays attached and
+    // undrawn (BackingViewKind.retiresWhenReplaced): its surface leaves the
+    // renderer now, and the view reports nothing more and punches no hole in
+    // the window.
+    void retire() {
+        releaseSurface();
+        mApi = SkiaViewAPI.DETACHED;
+        mRetired = true;
+    }
+
+    @Override
+    public boolean gatherTransparentRegion(Region region) {
+        return mRetired || super.gatherTransparentRegion(region);
     }
 
     @Override
