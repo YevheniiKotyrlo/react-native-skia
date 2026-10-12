@@ -26,7 +26,12 @@ public class SkiaSurfaceView extends SurfaceView implements SurfaceHolder.Callba
             @Override
             @RequiresApi(Build.VERSION_CODES.Q)
             public void runAfterWindowFrameCommits(Runnable handOver) {
-                getViewTreeObserver().registerFrameCommitCallback(handOver);
+                final long requestedAt = System.nanoTime();
+                getViewTreeObserver().registerFrameCommitCallback(() -> {
+                    long committedAt = System.nanoTime();
+                    handOver.run();
+                    android.util.Log.i("SkiaProbe", "handover requested " + requestedAt + " commit " + committedAt + " done " + System.nanoTime());
+                });
                 invalidate();
             }
 
@@ -65,6 +70,7 @@ public class SkiaSurfaceView extends SurfaceView implements SurfaceHolder.Callba
 
     @Override
     public void surfaceCreated(@NonNull SurfaceHolder holder) {
+        android.util.Log.i("SkiaProbe", "surfaceCreated " + System.nanoTime());
         mHandOver.onSurfaceCreated(SurfaceHandOver.defersArrivalToWindowFrame(
                 Build.VERSION.SDK_INT, isHardwareAccelerated(), mZOrderOnTop));
     }

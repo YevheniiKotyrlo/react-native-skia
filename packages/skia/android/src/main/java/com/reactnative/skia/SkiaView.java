@@ -57,7 +57,10 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
 
         @Override
         public boolean presentFrame() {
-            return hasNativeView() && SkiaView.this.presentFrame();
+            long start = System.nanoTime();
+            boolean left = hasNativeView() && SkiaView.this.presentFrame();
+            Log.i("SkiaProbe", "present " + start + " took " + (System.nanoTime() - start));
+            return left;
         }
     });
 
@@ -209,6 +212,7 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
 
     @Override
     public void doFrame(long frameTimeNanos) {
+        Log.i("SkiaProbe", "doFrame vsync " + frameTimeNanos + " at " + System.nanoTime());
         mFrameScheduler.onFrame(mAppliedKind);
     }
 
@@ -241,7 +245,9 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
         if (!hasNativeView()) {
             return;
         }
+        long start = System.nanoTime();
         surfaceAvailable(surface, width, height, true, mAppliedHighBitDepth);
+        Log.i("SkiaProbe", "surfaceAvailable " + start + " took " + (System.nanoTime() - start));
     }
 
     @Override
