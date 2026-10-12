@@ -4,6 +4,7 @@ import android.content.Context;
 import android.graphics.SurfaceTexture;
 import android.util.Log;
 import android.view.Choreographer;
+import android.view.Display;
 import android.view.MotionEvent;
 import android.view.Surface;
 import android.view.View;
@@ -233,6 +234,18 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
 
     // Surfaces ------------------------------------------------------------
 
+    private float resolveMaxRefreshRate() {
+        Display display = getDisplay();
+        if (display == null) {
+            return 0f;
+        }
+        float maxRefreshRate = 0f;
+        for (Display.Mode mode : display.getSupportedModes()) {
+            maxRefreshRate = Math.max(maxRefreshRate, mode.getRefreshRate());
+        }
+        return maxRefreshRate;
+    }
+
     // SurfaceView callbacks: the native side receives an android.view.Surface.
 
     @Override
@@ -240,7 +253,7 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
         if (!hasNativeView()) {
             return;
         }
-        surfaceAvailable(surface, width, height, true, mAppliedHighBitDepth);
+        surfaceAvailable(surface, width, height, true, mAppliedHighBitDepth, resolveMaxRefreshRate());
     }
 
     @Override
@@ -249,7 +262,7 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
         if (!hasNativeView()) {
             return;
         }
-        surfaceSizeChanged(surface, width, height, true, mAppliedHighBitDepth);
+        surfaceSizeChanged(surface, width, height, true, mAppliedHighBitDepth, resolveMaxRefreshRate());
     }
 
     // TextureView callbacks: the native side receives the SurfaceTexture and
@@ -260,7 +273,7 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
         if (!hasNativeView()) {
             return;
         }
-        surfaceAvailable(surface, width, height, false, false);
+        surfaceAvailable(surface, width, height, false, false, 0f);
     }
 
     @Override
@@ -269,7 +282,7 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
         if (!hasNativeView()) {
             return;
         }
-        surfaceSizeChanged(surface, width, height, false, false);
+        surfaceSizeChanged(surface, width, height, false, false, 0f);
     }
 
     @Override
@@ -286,9 +299,9 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
 
     // isSurface tells the native side whether `surface` is an
     // android.view.Surface (SurfaceView) or a SurfaceTexture (TextureView).
-    private native void surfaceAvailable(Object surface, int width, int height, boolean isSurface, boolean highBitDepth);
+    private native void surfaceAvailable(Object surface, int width, int height, boolean isSurface, boolean highBitDepth, float maxRefreshRate);
 
-    private native void surfaceSizeChanged(Object surface, int width, int height, boolean isSurface, boolean highBitDepth);
+    private native void surfaceSizeChanged(Object surface, int width, int height, boolean isSurface, boolean highBitDepth, float maxRefreshRate);
 
     private native void surfaceDestroyed();
 
