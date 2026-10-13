@@ -52,11 +52,7 @@ enum BackingViewKind {
      */
     boolean retiresWhenReplaced(int sdkInt, boolean shown, int width, int height) {
         return switch (this) {
-            case SURFACE_VIEW -> sdkInt >= Build.VERSION_CODES.Q
-                    && sdkInt <= Build.VERSION_CODES.S
-                    && shown
-                    && width > 0
-                    && height > 0;
+            case SURFACE_VIEW -> sdkInt < Build.VERSION_CODES.BASE && shown && width > 0 && height > 0;
             case TEXTURE_VIEW -> false;
         };
     }
