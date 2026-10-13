@@ -54,7 +54,8 @@ protected:
   void surfaceAvailable(jobject surface, int width, int height, bool isSurface,
                         bool highBitDepth) {
     attachWindow(surface, width, height, isSurface, highBitDepth);
-    _view->redraw(RNSkView::WindowContent::Nothing);
+    _view->redraw(isSurface ? RNSkView::WindowContent::LastFrame
+                            : RNSkView::WindowContent::Nothing);
   }
 
   void surfaceSizeChanged(jobject surface, int width, int height,
