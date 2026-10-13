@@ -140,9 +140,7 @@ const useHasCanvasSizeReaders = (channel: CanvasSizeChannel | null) => {
   return useSyncExternalStore(subscribe, hasReaders, hasReaders);
 };
 
-export interface CanvasProps extends Omit<ViewProps, "onLayout"> {
-  /** @deprecated Not supported on native. Use `onSize` or `useCanvasSize()` instead. */
-  onLayout?: ViewProps["onLayout"];
+export interface CanvasProps extends ViewProps {
   /**
    * Declares that the canvas covers every pixel of its bounds, so nothing
    * behind it needs to show through. On Android an opaque canvas is backed by
@@ -314,13 +312,7 @@ const useCanvasRoot = ({
   children,
   onSize,
   ref,
-  onLayout,
-}: Pick<CanvasProps, "children" | "onSize" | "ref" | "onLayout">) => {
-  if (onLayout && Platform.OS !== "web") {
-    console.error(
-      "<Canvas onLayout={onLayout} /> is not supported on the new architecture, to fix the issue, see: https://wcandillon.github.io/react-native-skia/docs/canvas/overview/#canvas-size"
-    );
-  }
+}: Pick<CanvasProps, "children" | "onSize" | "ref">) => {
   const viewRef = useRef<View>(null);
   // Native ID
   const nativeId = useMemo(() => {
@@ -440,7 +432,6 @@ export const Canvas = ({
       children,
       onSize,
       ref,
-      onLayout,
     });
   return (
     <>
