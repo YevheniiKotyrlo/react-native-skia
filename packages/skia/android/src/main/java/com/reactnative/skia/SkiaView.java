@@ -143,7 +143,11 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
                 || kind != mAppliedKind
                 || zOrderOnTop != mAppliedZOrderOnTop
                 || highBitDepth != mAppliedHighBitDepth) {
-            removeRetiredSurfaceView();
+            if (kind == BackingViewKind.SURFACE_VIEW) {
+                removeRetiredSurfaceViewAfterWindowFrame();
+            } else {
+                removeRetiredSurfaceView();
+            }
             if (mView != null) {
                 if (mAppliedKind.retiresWhenReplaced(Build.VERSION.SDK_INT, isShown(), getWidth(), getHeight())) {
                     retireSurfaceView((SkiaSurfaceView) mView);
@@ -194,6 +198,19 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
         }
         mRetiredSurfaceView = null;
         removeView(retired);
+    }
+
+    private void removeRetiredSurfaceViewAfterWindowFrame() {
+        SkiaSurfaceView retired = mRetiredSurfaceView;
+        if (retired == null) {
+            return;
+        }
+        getViewTreeObserver().registerFrameCommitCallback(() -> {
+            if (mRetiredSurfaceView == retired) {
+                removeRetiredSurfaceView();
+            }
+        });
+        invalidate();
     }
 
     @Override
