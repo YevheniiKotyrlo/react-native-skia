@@ -67,6 +67,19 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
         }
     });
 
+    private int mTraceDraw = 0;
+    private final android.view.ViewTreeObserver.OnDrawListener mTraceDrawListener = () -> {
+        int draw = ++mTraceDraw;
+        SwapTrace.log("draw " + draw + " children=" + SwapTrace.describeChildren(this));
+        getViewTreeObserver().registerFrameCommitCallback(() -> SwapTrace.log("commit " + draw));
+    };
+
+    @Override
+    protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        getViewTreeObserver().addOnDrawListener(mTraceDrawListener);
+    }
+
     public SkiaView(Context context) {
         super(context);
         // ReactViewGroup disables clipChildren (RN overflow is handled with canvas
@@ -136,6 +149,7 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
     // it attaches (zOrderOnTop, the buffer format), replaces the child; opacity
     // is applied in place.
     void updateView() {
+        SwapTrace.log("updateView-start kind=" + mAppliedKind + " children=" + SwapTrace.describeChildren(this));
         BackingViewKind kind = resolveKind();
         boolean zOrderOnTop = kind == BackingViewKind.SURFACE_VIEW && mZOrderOnTop;
         boolean highBitDepth = resolveHighBitDepth(kind);
@@ -171,6 +185,7 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
             if (kind.receivesSurfaceBeforeFirstDraw(isShown(), getWidth(), getHeight())) {
                 ((SkiaTextureView) mView).supplySurfaceTexture(getWidth(), getHeight());
             }
+            SwapTrace.log("updateView-end kind=" + kind + " children=" + SwapTrace.describeChildren(this));
         } else {
             switch (kind) {
                 case SURFACE_VIEW -> ((SkiaSurfaceView) mView).setOpaque(mOpaque);
@@ -193,6 +208,7 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
             return;
         }
         mRetiredSurfaceView = null;
+        SwapTrace.log("remove-retired sv@" + Integer.toHexString(System.identityHashCode(retired)));
         removeView(retired);
     }
 
@@ -264,6 +280,7 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
 
     @Override
     protected void onDetachedFromWindow() {
+        getViewTreeObserver().removeOnDrawListener(mTraceDrawListener);
         super.onDetachedFromWindow();
         Choreographer.getInstance().removeFrameCallback(this);
         removeCallbacks(mPostedPresent);

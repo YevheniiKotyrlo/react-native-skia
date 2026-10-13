@@ -34,6 +34,7 @@ public class SkiaSurfaceView extends SurfaceView implements SurfaceHolder.Callba
     // renderer now, and the view reports nothing more and punches no hole in
     // the window.
     void retire() {
+        SwapTrace.log("retire sv@" + Integer.toHexString(System.identityHashCode(this)));
         mApi.onSurfaceDestroyed();
         mApi = SkiaViewAPI.DETACHED;
         mRetired = true;
@@ -44,24 +45,37 @@ public class SkiaSurfaceView extends SurfaceView implements SurfaceHolder.Callba
         return mRetired || super.gatherTransparentRegion(region);
     }
 
+    boolean isRetired() {
+        return mRetired;
+    }
+
+    void probeHole(Region region) {
+        super.gatherTransparentRegion(region);
+    }
+
     @Override
     protected void onDetachedFromWindow() {
+        SwapTrace.log("detach-start sv@" + Integer.toHexString(System.identityHashCode(this)) + " retired=" + mRetired);
         super.onDetachedFromWindow();
+        SwapTrace.log("detach-end sv@" + Integer.toHexString(System.identityHashCode(this)));
         mApi.onSurfaceDestroyed();
     }
 
     @Override
     public void surfaceCreated(@NonNull SurfaceHolder holder) {
+        SwapTrace.log("surfaceCreated sv@" + Integer.toHexString(System.identityHashCode(this)));
         mApi.onSurfaceCreated(holder.getSurface(), getWidth(), getHeight());
     }
 
     @Override
     public void surfaceChanged(@NonNull SurfaceHolder holder, int format, int width, int height) {
+        SwapTrace.log("surfaceChanged sv@" + Integer.toHexString(System.identityHashCode(this)));
         mApi.onSurfaceChanged(holder.getSurface(), getWidth(), getHeight());
     }
 
     @Override
     public void surfaceDestroyed(@NonNull SurfaceHolder holder) {
+        SwapTrace.log("surfaceDestroyed sv@" + Integer.toHexString(System.identityHashCode(this)));
         mApi.onSurfaceDestroyed();
     }
 }
