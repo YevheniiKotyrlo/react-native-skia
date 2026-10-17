@@ -4,6 +4,7 @@
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -136,7 +137,7 @@ public:
             runtime, thisValue, arguments, count);
     if (textureCharge != nullptr && textureCharge->hasHolders()) {
       textureCharge->markReleased();
-      chargeSharedTexture(runtime, sharedImages);
+      chargeSharedTexture(runtime, textureCharge, sharedImages);
     }
     return result;
   }
@@ -248,22 +249,32 @@ protected:
   }
 
 private:
-  // Charges this runtime for the texture through the wrappers it holds. A
-  // runtime holding only an image's wrapper made elsewhere is charged when it
-  // converts the image next (see JsiSkImage::create).
+  // Charges this runtime for the texture through the wrappers it holds, which
+  // all keep one charge object under one key. A runtime holding only an
+  // image's wrapper made elsewhere is charged when it converts the image next
+  // (see JsiSkImage::create).
   static void chargeSharedTexture(
       jsi::Runtime &runtime,
+      const std::shared_ptr<SharedTextureCharge> &textureCharge,
       const std::vector<std::weak_ptr<JsiSkImage>> &sharedImages) {
     auto &cache = RNJsi::JSICache::get(runtime);
+    std::optional<std::pair<jsi::PropNameID, jsi::Value>> charge;
     for (const auto &sharedImage : sharedImages) {
       auto image = sharedImage.lock();
-      if (image == nullptr) {
+      if (image == nullptr || !image->holdsTexture()) {
         continue;
       }
       auto wrapper = cache.lockWrapper(runtime, image.get());
-      if (wrapper.isObject()) {
-        image->chargeRuntime(runtime, wrapper.getObject(runtime));
+      if (!wrapper.isObject()) {
+        continue;
       }
+      if (!charge.has_value()) {
+        charge.emplace(
+            JsiSkImage::textureChargeKey(runtime),
+            JsiSkImage::resolveRuntimeCharge(runtime, textureCharge));
+      }
+      wrapper.getObject(runtime).setProperty(runtime, charge->first,
+                                             charge->second);
     }
   }
 

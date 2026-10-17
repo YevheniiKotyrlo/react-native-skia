@@ -535,16 +535,39 @@ public:
     if (textureCharge == nullptr || !textureCharge->released()) {
       return;
     }
+    wrapper.setProperty(runtime, textureChargeKey(runtime),
+                        resolveRuntimeCharge(runtime, textureCharge));
+  }
+
+  /**
+   The object charging `runtime` for the texture whose holders
+   `textureCharge` counts, made with the first wrapper there that keeps it
+   reachable.
+   */
+  static jsi::Value resolveRuntimeCharge(
+      jsi::Runtime &runtime,
+      const std::shared_ptr<SharedTextureCharge> &textureCharge) {
     auto &cache = RNJsi::JSICache::get(runtime);
     auto charge = cache.lockWrapper(runtime, textureCharge.get());
-    if (!charge.isObject()) {
-      jsi::Object created(runtime);
-      created.setNativeState(runtime, textureCharge);
-      created.setExternalMemoryPressure(runtime, textureCharge->textureBytes());
-      cache.setWrapper(runtime, textureCharge.get(), created);
-      charge = jsi::Value(runtime, created);
+    if (charge.isObject()) {
+      return charge;
     }
-    wrapper.setProperty(runtime, textureChargeKey(runtime), charge);
+    jsi::Object created(runtime);
+    created.setNativeState(runtime, textureCharge);
+    created.setExternalMemoryPressure(runtime, textureCharge->textureBytes());
+    cache.setWrapper(runtime, textureCharge.get(), created);
+    return jsi::Value(runtime, created);
+  }
+
+  // A registered symbol, so every wrapper keeps its runtime's charge under one
+  // key whichever conversion attached it.
+  static jsi::PropNameID textureChargeKey(jsi::Runtime &runtime) {
+    auto symbolFor = runtime.global()
+                         .getPropertyAsObject(runtime, "Symbol")
+                         .getPropertyAsFunction(runtime, "for");
+    return jsi::PropNameID::forSymbol(
+        runtime, symbolFor.call(runtime, "react-native-skia.textureCharge")
+                     .getSymbol(runtime));
   }
 
   // Disposing the last image that holds a disposed surface's texture frees
@@ -588,17 +611,6 @@ public:
   }
 
 private:
-  // A registered symbol, so every wrapper keeps its runtime's charge under one
-  // key whichever conversion attached it.
-  static jsi::PropNameID textureChargeKey(jsi::Runtime &runtime) {
-    auto symbolFor = runtime.global()
-                         .getPropertyAsObject(runtime, "Symbol")
-                         .getPropertyAsFunction(runtime, "for");
-    return jsi::PropNameID::forSymbol(
-        runtime, symbolFor.call(runtime, "react-native-skia.textureCharge")
-                     .getSymbol(runtime));
-  }
-
   void releaseTextureHold(jsi::Runtime *runtime) {
     if (!_holdsTexture.exchange(false)) {
       return;
