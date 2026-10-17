@@ -154,6 +154,7 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
                 || zOrderOnTop != mAppliedZOrderOnTop
                 || highBitDepth != mAppliedHighBitDepth) {
             removeRetiredSurfaceView();
+            boolean replacesCanvasOnScreen = mView != null && isShown() && getWidth() > 0 && getHeight() > 0;
             if (mView != null) {
                 if (mAppliedKind.retiresWhenReplaced(Build.VERSION.SDK_INT, isShown(), getWidth(), getHeight())) {
                     retireSurfaceView((SkiaSurfaceView) mView);
@@ -165,7 +166,7 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
             mAppliedZOrderOnTop = zOrderOnTop;
             mAppliedHighBitDepth = highBitDepth;
             mView = switch (kind) {
-                case SURFACE_VIEW -> new SkiaSurfaceView(getContext(), this, zOrderOnTop, mOpaque);
+                case SURFACE_VIEW -> new SkiaSurfaceView(getContext(), this, zOrderOnTop, mOpaque, replacesCanvasOnScreen);
                 case TEXTURE_VIEW -> new SkiaTextureView(getContext(), this, mOpaque);
             };
             addView(mView);
@@ -341,6 +342,22 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
         surfaceDestroyed();
     }
 
+    @Override
+    public void holdFirstFrame() {
+        if (!hasNativeView()) {
+            return;
+        }
+        holdPresents();
+    }
+
+    @Override
+    public void releaseFirstFrame() {
+        if (!hasNativeView()) {
+            return;
+        }
+        releasePresents();
+    }
+
     // Native ---------------------------------------------------------------
 
     private native HybridData initHybrid(SkiaManager skiaManager);
@@ -361,4 +378,9 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
 
     /** Presents the queued recordings, returning whether any are left. */
     private native boolean presentFrame();
+
+    private native void holdPresents();
+
+    /** Lets go of holdPresents() and presents at once. */
+    private native void releasePresents();
 }
