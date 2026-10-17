@@ -27,6 +27,16 @@ public class SkiaTextureView extends TextureView implements TextureView.SurfaceT
         setSurfaceTextureListener(this);
     }
 
+    // Hands the view its texture before its first draw, which then shows the
+    // frame presented into it (see BackingViewKind.receivesSurfaceBeforeFirstDraw).
+    // TextureView reports no onSurfaceTextureAvailable for a texture it was given.
+    void supplySurfaceTexture(int width, int height) {
+        SurfaceTexture surfaceTexture = new SurfaceTexture(false);
+        surfaceTexture.setDefaultBufferSize(width, height);
+        setSurfaceTexture(surfaceTexture);
+        mApi.onSurfaceTextureCreated(surfaceTexture, width, height);
+    }
+
     @Override
     public void setOpaque(boolean opaque) {
         super.setOpaque(TextureViewOpacity.marksOpaque(opaque, Build.VERSION.SDK_INT, this::readDeviceGlEsVersion));

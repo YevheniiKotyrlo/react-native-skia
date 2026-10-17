@@ -1,6 +1,8 @@
 package com.reactnative.skia;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 import android.os.Build;
 
@@ -56,5 +58,64 @@ public class BackingViewKindTest {
         for (int sdkInt : BEFORE_ANDROID_12L) {
             assertEquals(BackingViewKind.SURFACE_VIEW, BackingViewKind.forAutoSurfaceType(true, false, true, sdkInt));
         }
+    }
+
+    @Test
+    public void surfaceViewShownAndLaidOutIsRetiredWhenReplacedOnAndroid10To12() {
+        assertTrue(BackingViewKind.SURFACE_VIEW.retiresWhenReplaced(Build.VERSION_CODES.Q, true, 260, 200));
+        assertTrue(BackingViewKind.SURFACE_VIEW.retiresWhenReplaced(Build.VERSION_CODES.R, true, 260, 200));
+        assertTrue(BackingViewKind.SURFACE_VIEW.retiresWhenReplaced(Build.VERSION_CODES.S, true, 260, 200));
+    }
+
+    @Test
+    public void surfaceViewIsRemovedWhenReplacedFromAndroid12L() {
+        assertFalse(BackingViewKind.SURFACE_VIEW.retiresWhenReplaced(Build.VERSION_CODES.S_V2, true, 260, 200));
+        assertFalse(BackingViewKind.SURFACE_VIEW.retiresWhenReplaced(Build.VERSION_CODES.UPSIDE_DOWN_CAKE, true, 260, 200));
+    }
+
+    @Test
+    public void surfaceViewIsRemovedWhenReplacedBeforeAndroid10() {
+        assertFalse(BackingViewKind.SURFACE_VIEW.retiresWhenReplaced(Build.VERSION_CODES.O, true, 260, 200));
+        assertFalse(BackingViewKind.SURFACE_VIEW.retiresWhenReplaced(Build.VERSION_CODES.P, true, 260, 200));
+    }
+
+    @Test
+    public void surfaceViewThatIsNotShownIsRemovedWhenReplaced() {
+        assertFalse(BackingViewKind.SURFACE_VIEW.retiresWhenReplaced(Build.VERSION_CODES.Q, false, 260, 200));
+    }
+
+    @Test
+    public void surfaceViewWithoutASizeIsRemovedWhenReplaced() {
+        assertFalse(BackingViewKind.SURFACE_VIEW.retiresWhenReplaced(Build.VERSION_CODES.Q, true, 0, 200));
+        assertFalse(BackingViewKind.SURFACE_VIEW.retiresWhenReplaced(Build.VERSION_CODES.Q, true, 260, 0));
+    }
+
+    @Test
+    public void textureViewIsRemovedWhenReplaced() {
+        assertFalse(BackingViewKind.TEXTURE_VIEW.retiresWhenReplaced(Build.VERSION_CODES.P, true, 260, 200));
+        assertFalse(BackingViewKind.TEXTURE_VIEW.retiresWhenReplaced(Build.VERSION_CODES.Q, true, 260, 200));
+        assertFalse(BackingViewKind.TEXTURE_VIEW.retiresWhenReplaced(Build.VERSION_CODES.R, true, 260, 200));
+    }
+
+    @Test
+    public void textureViewShownAndLaidOutReceivesItsSurfaceBeforeItsFirstDraw() {
+        assertTrue(BackingViewKind.TEXTURE_VIEW.receivesSurfaceBeforeFirstDraw(true, 260, 200));
+    }
+
+    @Test
+    public void textureViewThatIsNotShownKeepsTheLazyPath() {
+        assertFalse(BackingViewKind.TEXTURE_VIEW.receivesSurfaceBeforeFirstDraw(false, 260, 200));
+    }
+
+    @Test
+    public void textureViewWithoutASizeKeepsTheLazyPath() {
+        assertFalse(BackingViewKind.TEXTURE_VIEW.receivesSurfaceBeforeFirstDraw(true, 0, 200));
+        assertFalse(BackingViewKind.TEXTURE_VIEW.receivesSurfaceBeforeFirstDraw(true, 260, 0));
+    }
+
+    @Test
+    public void surfaceViewNeverReceivesItsSurfaceBeforeItsFirstDraw() {
+        assertFalse(BackingViewKind.SURFACE_VIEW.receivesSurfaceBeforeFirstDraw(true, 260, 200));
+        assertFalse(BackingViewKind.SURFACE_VIEW.receivesSurfaceBeforeFirstDraw(false, 260, 200));
     }
 }

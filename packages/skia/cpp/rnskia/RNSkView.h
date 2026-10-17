@@ -152,18 +152,27 @@ public:
     postRedraw();
   }
 
+  /** What the window a redraw presents into shows until a frame lands. */
+  enum class WindowContent {
+    /** The last frame presented into it: a resized or reconfigured window. */
+    LastFrame,
+    /** Nothing: a new window shows a frame only once one is presented. */
+    Nothing,
+  };
+
   /**
    Main thread. Presents everything submitted since the last frame; with
-   nothing queued, presents the last frame again (a redraw after a resize or
-   on a new surface). Without a surface the queue is left alone: the surface
-   presents it when it appears. While the window cannot show a frame (the
-   app in the background, see RNSkWindowSurface::setCanPresent) nothing is
-   replayed either: the redraw stays requested, and onCanPresent() schedules
-   it again. A frame the window could not take (no drawable) is queued again
-   and handed to the frame scheduler, which tries it on the view's next frame
-   (see setFrameScheduler).
+   nothing queued, presents the last frame again, unless a new one is on its
+   way and the window still shows the last (see WindowContent). Without a
+   surface the queue is left alone: the surface presents it when it appears.
+   While the window cannot show a frame (the app in the background, see
+   RNSkWindowSurface::setCanPresent) nothing is replayed either: the redraw
+   stays requested, and onCanPresent() schedules it again. A frame the window
+   could not take (no drawable) is queued again and handed to the frame
+   scheduler, which tries it on the view's next frame (see
+   setFrameScheduler).
    */
-  void redraw() {
+  void redraw(WindowContent windowContent = WindowContent::LastFrame) {
     RNSkGraphiteTargetInfo targetInfo;
     if (!_surface->getTargetInfo(&targetInfo)) {
       _redrawRequested = false;
@@ -181,17 +190,21 @@ public:
     }
     auto recordings = target->takeQueued();
     if (recordings.empty()) {
-      // With a frame on its way, the layer keeps showing the last one until
-      // it lands: presenting it again would only cost a second present.
-      // Otherwise the last frame is presented again, also onto a surface of
-      // another size (the view was resized and nothing records for it): the
-      // frame then shows at its own size rather than nothing at all.
+      // With a frame on its way, a window that shows the last one keeps
+      // showing it until the new one lands: presenting it again would only
+      // cost a second present. A new window shows nothing until something is
+      // presented into it, so it gets the last frame now rather than when the
+      // new one lands. Otherwise the last frame is presented again, also onto
+      // a surface of another size (the view was resized and nothing records
+      // for it): the frame then shows at its own size rather than nothing at
+      // all.
       std::shared_ptr<RNSkGraphiteRecording> lastPresented;
       {
         std::lock_guard<std::mutex> lock(_mutex);
         lastPresented = _lastPresented;
       }
-      if (frameComing || lastPresented == nullptr) {
+      if (lastPresented == nullptr ||
+          (frameComing && windowContent == WindowContent::LastFrame)) {
         return;
       }
       recordings.push_back(std::move(lastPresented));
