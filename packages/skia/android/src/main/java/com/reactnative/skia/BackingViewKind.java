@@ -62,23 +62,6 @@ enum BackingViewKind {
     }
 
     /**
-     * Whether a new view of this kind, replacing an outgoing one, keeps that
-     * view on screen until the new one shows the canvas (OutgoingViewHold). A
-     * SurfaceView shows nothing before its first frame, while an outgoing
-     * TextureView leaves with the window frame that removes it, so swapping a
-     * canvas on screen would show what lies under it in between. An outgoing
-     * SurfaceView is not kept: a TextureView draws inside the window, so it
-     * reaches the screen with the window frame the SurfaceView leaves with,
-     * and keeping the SurfaceView longer would only blend the two.
-     */
-    boolean keepsOutgoingOnScreen(BackingViewKind outgoing, boolean shown, int width, int height) {
-        return switch (this) {
-            case SURFACE_VIEW -> outgoing == TEXTURE_VIEW && shown && width > 0 && height > 0;
-            case TEXTURE_VIEW -> false;
-        };
-    }
-
-    /**
      * The kind "auto" picks: a SurfaceView for an opaque canvas and a
      * TextureView otherwise. Before Android 12L an opaque canvas gets a
      * TextureView too, unless it asks for zOrderOnTop or highBitDepth, which

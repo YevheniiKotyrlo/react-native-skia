@@ -37,12 +37,6 @@ public class SkiaTextureView extends TextureView implements TextureView.SurfaceT
         mApi.onSurfaceTextureCreated(surfaceTexture, width, height);
     }
 
-    // The renderer moved to another view: this one keeps its last frame on screen
-    // until it is removed, and reports nothing.
-    void detachFromRenderer() {
-        mApi = SkiaViewAPI.DETACHED;
-    }
-
     @Override
     public void setOpaque(boolean opaque) {
         super.setOpaque(TextureViewOpacity.marksOpaque(opaque, Build.VERSION.SDK_INT, this::readDeviceGlEsVersion));
