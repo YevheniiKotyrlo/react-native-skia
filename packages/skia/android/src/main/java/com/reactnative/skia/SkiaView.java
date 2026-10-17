@@ -35,6 +35,34 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
     // window or the window hides: see BackingViewKind.retiresWhenReplaced.
     @Nullable
     private SkiaSurfaceView mRetiredSurfaceView;
+    // Above mView until mView shows the canvas, see updateView().
+    private final OutgoingViewHold<SkiaTextureView> mOutgoingView =
+            new OutgoingViewHold<>(new OutgoingViewHold.Host<SkiaTextureView>() {
+                @Override
+                public void removeView(SkiaTextureView view) {
+                    SkiaView.this.removeView(view);
+                }
+
+                @Override
+                public void runAfterWindowFrameCommits(Runnable action) {
+                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                        action.run();
+                        return;
+                    }
+                    getViewTreeObserver().registerFrameCommitCallback(action);
+                    invalidate();
+                }
+
+                @Override
+                public void postDelayed(Runnable action, long delayMillis) {
+                    SkiaView.this.postDelayed(action, delayMillis);
+                }
+
+                @Override
+                public void removeCallbacks(Runnable action) {
+                    SkiaView.this.removeCallbacks(action);
+                }
+            });
 
     // Props, applied together in updateView(). A null kind is "auto".
     private boolean mOpaque = false;
@@ -154,9 +182,14 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
                 || zOrderOnTop != mAppliedZOrderOnTop
                 || highBitDepth != mAppliedHighBitDepth) {
             removeRetiredSurfaceView();
+            mOutgoingView.release();
             boolean replacesCanvasOnScreen = mView != null && isShown() && getWidth() > 0 && getHeight() > 0;
             if (mView != null) {
-                if (mAppliedKind.retiresWhenReplaced(Build.VERSION.SDK_INT, isShown(), getWidth(), getHeight())) {
+                if (kind.keepsOutgoingOnScreen(mAppliedKind, isShown(), getWidth(), getHeight())) {
+                    SkiaTextureView outgoing = (SkiaTextureView) mView;
+                    outgoing.detachFromRenderer();
+                    mOutgoingView.hold(outgoing, OutgoingViewHold.Arrival.ofSurfaceView(Build.VERSION.SDK_INT, zOrderOnTop));
+                } else if (mAppliedKind.retiresWhenReplaced(Build.VERSION.SDK_INT, isShown(), getWidth(), getHeight())) {
                     retireSurfaceView((SkiaSurfaceView) mView);
                 } else {
                     removeView(mView);
@@ -169,7 +202,8 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
                 case SURFACE_VIEW -> new SkiaSurfaceView(getContext(), this, zOrderOnTop, mOpaque, replacesCanvasOnScreen);
                 case TEXTURE_VIEW -> new SkiaTextureView(getContext(), this, mOpaque);
             };
-            addView(mView);
+            // Beneath an outgoing view, which covers it until it shows the canvas.
+            addView(mView, 0);
             // React Native sizes native children explicitly through onLayout, so
             // the requestLayout triggered by addView is ignored; size the new
             // child ourselves or it stays 0x0 and never gets a surface.
@@ -254,6 +288,10 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
         if (mView != null) {
             mView.layout(0, 0, right - left, bottom - top);
         }
+        SkiaTextureView outgoing = mOutgoingView.held();
+        if (outgoing != null) {
+            outgoing.layout(0, 0, right - left, bottom - top);
+        }
     }
 
     // Frames --------------------------------------------------------------
@@ -261,8 +299,22 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
     /** The first frame was presented into a SurfaceView's surface. Main thread; called from native. */
     @DoNotStrip
     public void onFirstFramePresented() {
+        // Before the SurfaceView reports its draw: a report made during a window
+        // relayout opens the hole at once, even on Android 13.
+        mOutgoingView.onFirstFramePresented();
         if (mView instanceof SkiaSurfaceView) {
             ((SkiaSurfaceView) mView).onFirstFramePresented();
+        }
+    }
+
+    // A SurfaceView asks its parent for the window's transparent region as it
+    // attaches and, from Android 11, as it opens its hole
+    // (SurfaceView.performDrawFinished).
+    @Override
+    public void requestTransparentRegion(View child) {
+        super.requestTransparentRegion(child);
+        if (child == mView) {
+            mOutgoingView.onTransparentRegionRequested();
         }
     }
 
@@ -288,6 +340,7 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
         removeCallbacks(mPostedPresent);
         mFrameScheduler.cancel();
         removeRetiredSurfaceView();
+        mOutgoingView.release();
     }
 
     // A no-op for a dropped view (see dropInstance), which every mounted view
