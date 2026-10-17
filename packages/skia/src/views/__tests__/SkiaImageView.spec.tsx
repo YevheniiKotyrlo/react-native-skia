@@ -7,6 +7,7 @@ import { createRoot } from "react-dom/client";
 
 import type { SkImage } from "../../skia/types";
 import { SkiaImageView } from "../SkiaImageView";
+import { SkiaViewApi } from "../api";
 
 // Every retain, release and id the native view was given, in order.
 const mockLog: string[] = [];
@@ -92,5 +93,20 @@ describe("SkiaImageView on native", () => {
     expect(retains.length).toBe(2);
     expect(releases.length).toBe(2);
     expect(mockLog[mockLog.length - 1]).toBe("release 7");
+  });
+
+  // A development build made before SkiaImageView existed, running this
+  // version's JavaScript.
+  it("names a native build that predates it", () => {
+    const { presentedImageId } = SkiaViewApi;
+    Reflect.deleteProperty(SkiaViewApi, "presentedImageId");
+    try {
+      expect(() => mountView(<SkiaImageView image={makeImage(7)} />)).toThrow(
+        "React Native Skia: the native module does not provide SkiaImageView. " +
+          "Rebuild the app so the native code matches the JavaScript."
+      );
+    } finally {
+      Object.assign(SkiaViewApi, { presentedImageId });
+    }
   });
 });

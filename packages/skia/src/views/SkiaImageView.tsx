@@ -17,6 +17,12 @@ import type { SkiaImageViewProps } from "./types";
  * redrawn as its props change, belongs in a <Canvas>.
  */
 export const SkiaImageView = ({ image, ...viewProps }: SkiaImageViewProps) => {
+  if (typeof SkiaViewApi.presentedImageId !== "function") {
+    throw new Error(
+      "React Native Skia: the native module does not provide SkiaImageView. " +
+        "Rebuild the app so the native code matches the JavaScript."
+    );
+  }
   const presentedImageId =
     image === null ? 0 : SkiaViewApi.presentedImageId(image);
   useEffect(() => {
