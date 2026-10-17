@@ -394,6 +394,14 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
     }
 
     @Override
+    public void onSurfaceTextureUpdated() {
+        if (!hasNativeView()) {
+            return;
+        }
+        frameLatched();
+    }
+
+    @Override
     public void onSurfaceDestroyed() {
         // The surface is still valid here, so the vote can be taken back.
         mFrameRateVote.detach();
@@ -444,4 +452,6 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
 
     /** Lets go of holdPresents() and presents at once. */
     private native void releasePresents();
+
+    private native void frameLatched();
 }

@@ -77,5 +77,6 @@ public class SkiaTextureView extends TextureView implements TextureView.SurfaceT
 
     @Override
     public void onSurfaceTextureUpdated(@NonNull SurfaceTexture surface) {
+        mApi.onSurfaceTextureUpdated();
     }
 }

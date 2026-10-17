@@ -19,6 +19,9 @@ public interface SkiaViewAPI {
         public void onSurfaceTextureChanged(SurfaceTexture surface, int width, int height) {}
 
         @Override
+        public void onSurfaceTextureUpdated() {}
+
+        @Override
         public void onSurfaceDestroyed() {}
 
         @Override
@@ -35,6 +38,9 @@ public interface SkiaViewAPI {
     void onSurfaceTextureCreated(SurfaceTexture surface, int width, int height);
 
     void onSurfaceTextureChanged(SurfaceTexture surface, int width, int height);
+
+    /** The window drew the frame last presented into the SurfaceTexture. */
+    void onSurfaceTextureUpdated();
 
     void onSurfaceDestroyed();
 

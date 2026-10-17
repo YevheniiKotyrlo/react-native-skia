@@ -99,8 +99,9 @@ public:
   }
 
   /**
-   Installed by the platform view: whether the window can show a frame right
-   now (not while the app is in the background). The view presents nothing
+   Installed by the platform view: whether the window can take a frame right
+   now (not while the app is in the background, nor while an Android
+   TextureView has yet to show the last one). The view presents nothing
    while it returns false, and asks again once told that it can (see
    RNSkView::onCanPresent). Without one, an attached window always can.
    */
