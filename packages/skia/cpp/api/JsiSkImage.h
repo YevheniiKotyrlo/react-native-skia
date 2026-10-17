@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <optional>
 #include <string>
@@ -139,6 +140,34 @@ inline SkSamplingOptions SamplingOptionsFromValue(jsi::Runtime &runtime,
   }
   return samplingOptions;
 }
+
+/**
+ The charge of a texture a surface shares with the images surface.asImage()
+ returns. Once the surface is disposed, it is the native state of the object
+ that charges the texture (see JsiSkSurface::dispose).
+ */
+class SharedTextureCharge : public jsi::NativeState {
+public:
+  void addHolder(size_t textureBytes) {
+    _textureBytes.store(textureBytes, std::memory_order_relaxed);
+    _holders.fetch_add(1, std::memory_order_relaxed);
+  }
+  // Whether the image that stopped holding the texture was the last one.
+  bool releaseHolder() {
+    return _holders.fetch_sub(1, std::memory_order_acq_rel) == 1;
+  }
+  bool hasHolders() const {
+    return _holders.load(std::memory_order_acquire) > 0;
+  }
+  size_t textureBytes() const {
+    return _textureBytes.load(std::memory_order_relaxed);
+  }
+
+private:
+  // The images that hold the texture and are neither disposed nor collected.
+  std::atomic<size_t> _holders = 0;
+  std::atomic<size_t> _textureBytes = 0;
+};
 
 class JsiSkImage : public JsiSkWrappingSkPtrNativeObject<JsiSkImage, SkImage> {
 public:
@@ -452,14 +481,47 @@ public:
   }
 
   /**
-   `sharesTexture`: the image is a view of a texture someone else owns (see
-   surface.asImage()), which that owner already reports as its memory.
+   `textureCharge`: the image is a view of a texture a surface owns (see
+   surface.asImage()), charged by the surface while it lives and then by one
+   object its images keep reachable. While the charge is alive the image
+   reports none; once it is gone, the image keeps the texture alive and
+   reports it.
    */
-  JsiSkImage(std::shared_ptr<RNSkPlatformContext> context, sk_sp<SkImage> image,
-             bool sharesTexture = false)
+  JsiSkImage(
+      std::shared_ptr<RNSkPlatformContext> context, sk_sp<SkImage> image,
+      const std::shared_ptr<SharedTextureCharge> &textureCharge = nullptr)
       : JsiSkWrappingSkPtrNativeObject<JsiSkImage, SkImage>(std::move(context),
                                                             std::move(image)),
-        _sharesTexture(sharesTexture) {}
+        _textureCharge(textureCharge), _holdsTexture(textureCharge != nullptr) {
+    if (textureCharge != nullptr) {
+      textureCharge->addHolder(getObjectUnchecked()->textureSize());
+    }
+  }
+
+  ~JsiSkImage() override { releaseTextureHold(nullptr); }
+
+  // Whether the image still holds a texture it shares with a surface.
+  bool holdsTexture() const { return _holdsTexture.load(); }
+
+  // Disposing the last image that holds a disposed surface's texture frees
+  // the texture, so the object charging it stops (see JsiSkSurface::dispose).
+  JSI_HOST_FUNCTION(dispose) {
+    auto result = JsiSkWrappingSkPtrNativeObject<JsiSkImage, SkImage>::dispose(
+        runtime, thisValue, arguments, count);
+    releaseTextureHold(&runtime);
+    return result;
+  }
+
+  // Writes `image` over this image, as surface.makeImageSnapshot(rect, image)
+  // does: it no longer holds a texture it shared, and `wrapper` is charged
+  // with what it holds now.
+  void replaceImage(jsi::Runtime &runtime, const jsi::Object &wrapper,
+                    sk_sp<SkImage> image) {
+    releaseTextureHold(&runtime);
+    _textureCharge.reset();
+    setObject(std::move(image));
+    wrapper.setExternalMemoryPressure(runtime, getMemoryPressure());
+  }
 
   size_t getMemoryPressure() override {
     if (isDisposed()) {
@@ -468,7 +530,7 @@ public:
     auto image = getObjectUnchecked();
     if (image) {
       if (image->isTextureBacked()) {
-        return _sharesTexture ? 0 : image->textureSize();
+        return _textureCharge.expired() ? image->textureSize() : 0;
       }
       if (image->isLazyGenerated()) {
         // Still encoded: what it holds is the file, not the decoded pixels.
@@ -482,7 +544,25 @@ public:
   }
 
 private:
-  bool _sharesTexture;
+  void releaseTextureHold(jsi::Runtime *runtime) {
+    if (!_holdsTexture.exchange(false)) {
+      return;
+    }
+    auto textureCharge = _textureCharge.lock();
+    if (textureCharge == nullptr || !textureCharge->releaseHolder() ||
+        runtime == nullptr) {
+      return;
+    }
+    auto charge = RNJsi::JSICache::get(*runtime).lockWrapper(
+        *runtime, textureCharge.get());
+    if (charge.isObject()) {
+      charge.getObject(*runtime).setExternalMemoryPressure(*runtime, 0);
+    }
+  }
+
+  std::weak_ptr<SharedTextureCharge> _textureCharge;
+  // Read from any runtime the image is disposed on, and by the GC.
+  std::atomic<bool> _holdsTexture;
 };
 
 } // namespace RNSkia
