@@ -3,7 +3,7 @@ import { createContext } from "react";
 import type { Fiber, HostConfig, ReactContext } from "react-reconciler";
 import { DefaultEventPriority } from "react-reconciler/constants";
 
-import { NodeType } from "../dom/types";
+import type { NodeType } from "../dom/types";
 
 import type { Node } from "./Node";
 import type { Container } from "./StaticContainer";
@@ -62,13 +62,6 @@ type SkiaHostConfig = HostConfig<
 >;
 let currentUpdatePriority: EventPriority = NoEventPriority;
 
-// What React appends in place of each node a Suspense boundary hides: a hidden node draws nothing, so it never enters the scene.
-const hiddenInstance: Instance = {
-  type: NodeType.Group,
-  props: {},
-  children: [],
-};
-
 export const sksgHostConfig: SkiaHostConfig = {
   /**
    * This function is used by the reconciler in order to calculate current time for prioritising work.
@@ -126,9 +119,7 @@ export const sksgHostConfig: SkiaHostConfig = {
   },
 
   appendInitialChild(parentInstance: Instance, child: Instance | TextInstance) {
-    if (child !== hiddenInstance) {
-      parentInstance.children.push(child);
-    }
+    parentInstance.children.push(child);
   },
 
   finalizeInitialChildren(
@@ -203,9 +194,7 @@ export const sksgHostConfig: SkiaHostConfig = {
     childSet: ChildSet,
     child: Instance | TextInstance
   ): void {
-    if (child !== hiddenInstance) {
-      childSet.push(child);
-    }
+    childSet.push(child);
   },
 
   finalizeContainerChildren(container: Container, newChildren: ChildSet) {
@@ -223,7 +212,7 @@ export const sksgHostConfig: SkiaHostConfig = {
     _props: Props
   ): Instance {
     debug("cloneHiddenInstance");
-    return hiddenInstance;
+    throw new Error("Not yet implemented.");
   },
 
   cloneHiddenTextInstance(_instance: Instance, _text: string): TextInstance {
