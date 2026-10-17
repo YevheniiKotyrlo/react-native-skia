@@ -345,6 +345,44 @@ describe("Native object memory pressure", () => {
     expect(held).toBeLessThan(size);
   });
 
+  it("charges the runtime an asImage() image crosses into, once another runtime released its surface", async () => {
+    if (surface.OS === "node") {
+      return;
+    }
+    const result = await surface.eval((_Skia, c) => {
+      const hermes = (globalThis as any).HermesInternal;
+      const { gc } = globalThis as any;
+      const { workletSerialization } = c as any;
+      if (!hermes?.getInstrumentedStats || !workletSerialization) {
+        return null;
+      }
+      const externalBytes = (): number =>
+        hermes.getInstrumentedStats().js_externalBytes;
+      const { width, height } = c;
+      if (typeof gc === "function") {
+        gc();
+      }
+      const before = externalBytes();
+      return workletSerialization
+        .bakeImageOnWorklet(width, height)
+        .then((image: any) => {
+          if (image === null) {
+            return null;
+          }
+          const held = externalBytes() - before;
+          image.dispose();
+          return { held, size: width * height * 4 };
+        });
+    }, ctx);
+    if (result === null) {
+      return;
+    }
+    // The worklet runtime disposed the surface, so the image alone keeps the
+    // texture alive, and the image lives on this runtime now.
+    const { held, size } = result as { held: number; size: number };
+    expect(held).toBeGreaterThanOrEqual(size);
+  });
+
   it("charges the snapshot makeImageSnapshot() writes into an asImage() image, not the texture it shared", async () => {
     if (surface.OS === "node") {
       return;

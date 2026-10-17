@@ -144,7 +144,8 @@ inline SkSamplingOptions SamplingOptionsFromValue(jsi::Runtime &runtime,
 /**
  The charge of a texture a surface shares with the images surface.asImage()
  returns. Once the surface is disposed, it is the native state of the object
- that charges the texture (see JsiSkSurface::dispose).
+ that charges the texture on each runtime holding one of those images (see
+ JsiSkImage::chargeRuntime).
  */
 class SharedTextureCharge : public jsi::NativeState {
 public:
@@ -162,11 +163,15 @@ public:
   size_t textureBytes() const {
     return _textureBytes.load(std::memory_order_relaxed);
   }
+  // The surface is disposed: only the images keep the texture alive.
+  void markReleased() { _released.store(true, std::memory_order_release); }
+  bool released() const { return _released.load(std::memory_order_acquire); }
 
 private:
   // The images that hold the texture and are neither disposed nor collected.
   std::atomic<size_t> _holders = 0;
   std::atomic<size_t> _textureBytes = 0;
+  std::atomic<bool> _released = false;
 };
 
 class JsiSkImage : public JsiSkWrappingSkPtrNativeObject<JsiSkImage, SkImage> {
@@ -503,6 +508,45 @@ public:
   // Whether the image still holds a texture it shares with a surface.
   bool holdsTexture() const { return _holdsTexture.load(); }
 
+  /**
+   The image's wrapper on `runtime`. Once the surface whose texture the image
+   shares is disposed, on this runtime or another, the runtime is charged the
+   texture as well (see chargeRuntime).
+   */
+  static jsi::Value create(jsi::Runtime &runtime,
+                           std::shared_ptr<JsiSkImage> instance) {
+    auto wrapper = RNJsi::NativeObject<JsiSkImage>::create(runtime, instance);
+    instance->chargeRuntime(runtime, wrapper.getObject(runtime));
+    return wrapper;
+  }
+
+  /**
+   Keeps `runtime`'s charge for the texture this image holds reachable from
+   `wrapper`. A runtime has one charge object per texture, made with its first
+   wrapper of an image holding it, so the texture is charged once to each
+   runtime that can keep it alive. Nothing while the surface still charges the
+   texture, or once the image stopped holding it.
+   */
+  void chargeRuntime(jsi::Runtime &runtime, const jsi::Object &wrapper) {
+    if (!_holdsTexture.load()) {
+      return;
+    }
+    auto textureCharge = _textureCharge.lock();
+    if (textureCharge == nullptr || !textureCharge->released()) {
+      return;
+    }
+    auto &cache = RNJsi::JSICache::get(runtime);
+    auto charge = cache.lockWrapper(runtime, textureCharge.get());
+    if (!charge.isObject()) {
+      jsi::Object created(runtime);
+      created.setNativeState(runtime, textureCharge);
+      created.setExternalMemoryPressure(runtime, textureCharge->textureBytes());
+      cache.setWrapper(runtime, textureCharge.get(), created);
+      charge = jsi::Value(runtime, created);
+    }
+    wrapper.setProperty(runtime, textureChargeKey(runtime), charge);
+  }
+
   // Disposing the last image that holds a disposed surface's texture frees
   // the texture, so the object charging it stops (see JsiSkSurface::dispose).
   JSI_HOST_FUNCTION(dispose) {
@@ -544,6 +588,17 @@ public:
   }
 
 private:
+  // A registered symbol, so every wrapper keeps its runtime's charge under one
+  // key whichever conversion attached it.
+  static jsi::PropNameID textureChargeKey(jsi::Runtime &runtime) {
+    auto symbolFor = runtime.global()
+                         .getPropertyAsObject(runtime, "Symbol")
+                         .getPropertyAsFunction(runtime, "for");
+    return jsi::PropNameID::forSymbol(
+        runtime, symbolFor.call(runtime, "react-native-skia.textureCharge")
+                     .getSymbol(runtime));
+  }
+
   void releaseTextureHold(jsi::Runtime *runtime) {
     if (!_holdsTexture.exchange(false)) {
       return;

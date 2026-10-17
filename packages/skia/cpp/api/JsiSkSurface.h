@@ -120,8 +120,9 @@ public:
   }
 
   // The texture outlives the disposed surface in the images that still hold
-  // it. One object charges it, kept reachable by those images' wrappers on
-  // this runtime, until the last of them is disposed or collected.
+  // it. On each runtime holding one of them, one object charges it, kept
+  // reachable by those images' wrappers there, until the last of them is
+  // disposed or collected.
   JSI_HOST_FUNCTION(dispose) {
     std::shared_ptr<SharedTextureCharge> textureCharge;
     std::vector<std::weak_ptr<JsiSkImage>> sharedImages;
@@ -134,7 +135,8 @@ public:
         JsiSkWrappingSkPtrNativeObject<JsiSkSurface, SkSurface>::dispose(
             runtime, thisValue, arguments, count);
     if (textureCharge != nullptr && textureCharge->hasHolders()) {
-      chargeSharedTexture(runtime, textureCharge, sharedImages);
+      textureCharge->markReleased();
+      chargeSharedTexture(runtime, sharedImages);
     }
     return result;
   }
@@ -246,38 +248,22 @@ protected:
   }
 
 private:
-  // Images whose wrapper lives only on another runtime are left out: once the
-  // charge is gone they report the texture at their next conversion.
+  // Charges this runtime for the texture through the wrappers it holds. A
+  // runtime holding only an image's wrapper made elsewhere is charged when it
+  // converts the image next (see JsiSkImage::create).
   static void chargeSharedTexture(
       jsi::Runtime &runtime,
-      const std::shared_ptr<SharedTextureCharge> &textureCharge,
       const std::vector<std::weak_ptr<JsiSkImage>> &sharedImages) {
     auto &cache = RNJsi::JSICache::get(runtime);
-    std::vector<jsi::Object> holders;
     for (const auto &sharedImage : sharedImages) {
       auto image = sharedImage.lock();
-      if (image == nullptr || !image->holdsTexture()) {
+      if (image == nullptr) {
         continue;
       }
       auto wrapper = cache.lockWrapper(runtime, image.get());
       if (wrapper.isObject()) {
-        holders.push_back(wrapper.getObject(runtime));
+        image->chargeRuntime(runtime, wrapper.getObject(runtime));
       }
-    }
-    if (holders.empty()) {
-      return;
-    }
-    jsi::Object charge(runtime);
-    charge.setNativeState(runtime, textureCharge);
-    charge.setExternalMemoryPressure(runtime, textureCharge->textureBytes());
-    cache.setWrapper(runtime, textureCharge.get(), charge);
-    auto key = jsi::PropNameID::forSymbol(
-        runtime, runtime.global()
-                     .getPropertyAsFunction(runtime, "Symbol")
-                     .call(runtime, "textureCharge")
-                     .getSymbol(runtime));
-    for (const auto &holder : holders) {
-      holder.setProperty(runtime, key, charge);
     }
   }
 
