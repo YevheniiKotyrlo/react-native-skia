@@ -16,6 +16,7 @@
 #include "include/core/SkData.h"
 #include "include/core/SkFontMgr.h"
 #include "include/core/SkImage.h"
+#include "include/core/SkPixmap.h"
 #include "include/core/SkStream.h"
 #include "include/core/SkSurface.h"
 
@@ -26,6 +27,22 @@
 namespace RNSkia {
 
 namespace react = facebook::react;
+
+/**
+ A bitmap of the platform's own, which a <SkiaImageView> draws inside the
+ window's drawing (see RNSkPresentedImages).
+ */
+class PresentedBitmap {
+public:
+  virtual ~PresentedBitmap() = default;
+
+  /**
+   Shows this bitmap in every <SkiaImageView> showing the image `id`, and in
+   any that starts to. Any thread: the views change on the main thread, in the
+   order presents and discards were made.
+   */
+  virtual void present(uint32_t id) = 0;
+};
 
 class RNSkPlatformContext {
 public:
@@ -132,6 +149,22 @@ public:
    * for a view before its surface exists.
    */
   virtual bool prefersP3ColorSpace() { return false; }
+
+  /**
+   Copies `pixels`, premultiplied 8-bit RGBA in sRGB, into a bitmap the
+   platform draws; nullptr on a platform without <SkiaImageView>. Never called
+   on the main thread or a JS thread.
+   */
+  virtual std::shared_ptr<PresentedBitmap>
+  makePresentedBitmap(const SkPixmap &pixels) {
+    return nullptr;
+  }
+
+  /**
+   Forgets the bitmap of the image `id`. A view still showing it keeps it until
+   it shows something else. Any thread, ordered with PresentedBitmap::present.
+   */
+  virtual void discardPresentedBitmap(uint32_t id) {}
 
 private:
   float _pixelDensity;

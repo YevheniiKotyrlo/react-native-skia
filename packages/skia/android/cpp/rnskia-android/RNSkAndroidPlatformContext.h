@@ -20,6 +20,29 @@
 
 namespace RNSkia {
 
+/** A Java bitmap the image views draw (see RNSkPresentedImages). */
+class AndroidPresentedBitmap : public PresentedBitmap {
+public:
+  AndroidPresentedBitmap(JniPlatformContext *jniPlatformContext,
+                         jni::global_ref<JBitmap::javaobject> bitmap)
+      : _jniPlatformContext(jniPlatformContext), _bitmap(std::move(bitmap)) {}
+
+  // The reference goes on whichever thread drops the last owner, which may
+  // not be attached to the JVM.
+  ~AndroidPresentedBitmap() override {
+    jni::ThreadScope ts;
+    _bitmap.reset();
+  }
+
+  void present(uint32_t id) override {
+    _jniPlatformContext->presentBitmap(id, _bitmap);
+  }
+
+private:
+  JniPlatformContext *_jniPlatformContext;
+  jni::global_ref<JBitmap::javaobject> _bitmap;
+};
+
 class RNSkAndroidPlatformContext : public RNSkPlatformContext {
 public:
   RNSkAndroidPlatformContext(
@@ -53,6 +76,20 @@ public:
 
   void runOnMainThread(std::function<void()> task) override {
     _jniPlatformContext->runTaskOnMainThread(std::move(task));
+  }
+
+  std::shared_ptr<PresentedBitmap>
+  makePresentedBitmap(const SkPixmap &pixels) override {
+    auto bitmap = _jniPlatformContext->makePresentedBitmap(pixels);
+    if (!bitmap) {
+      return nullptr;
+    }
+    return std::make_shared<AndroidPresentedBitmap>(_jniPlatformContext,
+                                                    std::move(bitmap));
+  }
+
+  void discardPresentedBitmap(uint32_t id) override {
+    _jniPlatformContext->discardPresentedBitmap(id);
   }
 
 private:

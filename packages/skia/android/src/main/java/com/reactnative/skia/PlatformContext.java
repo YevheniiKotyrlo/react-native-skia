@@ -1,5 +1,6 @@
 package com.reactnative.skia;
 
+import android.graphics.Bitmap;
 import android.os.Handler;
 import android.os.Looper;
 
@@ -16,6 +17,7 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
 import java.net.URLConnection;
+import java.nio.ByteBuffer;
 
 public class PlatformContext {
     @DoNotStrip
@@ -112,6 +114,24 @@ public class PlatformContext {
         } else {
             mainHandler.post(this::notifyTaskReadyNative);
         }
+    }
+
+    // The image views' bitmaps (see SkiaPresentedImages). Called from native,
+    // off the main thread.
+
+    @DoNotStrip
+    public Bitmap makePresentedBitmap(ByteBuffer pixels, int width, int height) {
+        return SkiaPresentedImages.makeBitmap(pixels, width, height);
+    }
+
+    @DoNotStrip
+    public void presentBitmap(long id, Bitmap bitmap) {
+        SkiaPresentedImages.publish(id, bitmap);
+    }
+
+    @DoNotStrip
+    public void discardPresentedBitmap(long id) {
+        SkiaPresentedImages.discard(id);
     }
 
     // Private c++ native methods

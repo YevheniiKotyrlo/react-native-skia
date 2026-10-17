@@ -13,10 +13,15 @@
 #include "RNSkPlatformContext.h"
 
 class SkStreamAsset;
+class SkPixmap;
 namespace RNSkia {
 
 namespace jsi = facebook::jsi;
 namespace jni = facebook::jni;
+
+struct JBitmap : jni::JavaClass<JBitmap> {
+  static constexpr auto kJavaDescriptor = "Landroid/graphics/Bitmap;";
+};
 
 class JniPlatformContext : public jni::HybridClass<JniPlatformContext> {
 public:
@@ -39,6 +44,19 @@ public:
   void runTaskOnMainThread(std::function<void()> task);
 
   void notifyTaskReadyNative();
+
+  /**
+   A Java bitmap holding a copy of `pixels`, premultiplied 8-bit RGBA, for the
+   image views (see RNSkPresentedImages). Any thread.
+   */
+  jni::global_ref<JBitmap::javaobject>
+  makePresentedBitmap(const SkPixmap &pixels);
+
+  /** Shows `bitmap` in the image views showing `id`. Any thread. */
+  void presentBitmap(uint32_t id, jni::alias_ref<JBitmap::javaobject> bitmap);
+
+  /** Forgets the bitmap of `id`. Any thread. */
+  void discardPresentedBitmap(uint32_t id);
 
   float getPixelDensity() { return _pixelDensity; }
 

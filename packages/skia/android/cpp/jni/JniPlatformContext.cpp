@@ -1,10 +1,15 @@
 #include "JniPlatformContext.h"
 
+#include <cstring>
 #include <exception>
 #include <thread>
 #include <utility>
+#include <vector>
+
+#include <fbjni/ByteBuffer.h>
 
 #include "include/core/SkData.h"
+#include "include/core/SkPixmap.h"
 #include "include/core/SkRefCnt.h"
 #include "include/core/SkStream.h"
 #include "include/core/SkTypes.h"
@@ -129,6 +134,50 @@ void JniPlatformContext::raiseError(const std::exception &err) {
   static auto method =
       javaPart_->getClass()->getMethod<void(std::string)>("raise");
   method(javaPart_.get(), std::string(err.what()));
+}
+
+jni::global_ref<JBitmap::javaobject>
+JniPlatformContext::makePresentedBitmap(const SkPixmap &pixels) {
+  jni::ThreadScope ts;
+  auto width = pixels.width();
+  auto height = pixels.height();
+  auto rowBytes = static_cast<size_t>(width) * 4;
+  // Bitmap.copyPixelsFromBuffer reads rows of exactly width * 4 bytes, while
+  // a readback may pad its rows.
+  std::vector<uint8_t> packed;
+  auto *bytes = static_cast<uint8_t *>(pixels.writable_addr());
+  if (pixels.rowBytes() != rowBytes) {
+    packed.resize(rowBytes * static_cast<size_t>(height));
+    for (int row = 0; row < height; row++) {
+      std::memcpy(packed.data() + rowBytes * static_cast<size_t>(row),
+                  pixels.addr(0, row), rowBytes);
+    }
+    bytes = packed.data();
+  }
+  auto buffer = jni::JByteBuffer::wrapBytes(
+      bytes, rowBytes * static_cast<size_t>(height));
+  static auto method =
+      javaPart_->getClass()
+          ->getMethod<JBitmap::javaobject(jni::alias_ref<jni::JByteBuffer>,
+                                          jint, jint)>("makePresentedBitmap");
+  return jni::make_global(method(javaPart_.get(), buffer, width, height));
+}
+
+void JniPlatformContext::presentBitmap(
+    uint32_t id, jni::alias_ref<JBitmap::javaobject> bitmap) {
+  jni::ThreadScope ts;
+  static auto method =
+      javaPart_->getClass()
+          ->getMethod<void(jlong, jni::alias_ref<JBitmap::javaobject>)>(
+              "presentBitmap");
+  method(javaPart_.get(), static_cast<jlong>(id), bitmap);
+}
+
+void JniPlatformContext::discardPresentedBitmap(uint32_t id) {
+  jni::ThreadScope ts;
+  static auto method =
+      javaPart_->getClass()->getMethod<void(jlong)>("discardPresentedBitmap");
+  method(javaPart_.get(), static_cast<jlong>(id));
 }
 
 } // namespace RNSkia

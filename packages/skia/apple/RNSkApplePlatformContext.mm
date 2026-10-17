@@ -6,11 +6,13 @@
 #include <utility>
 
 #include "RNDawnContext.h"
+#import "SkiaPresentedImages.h"
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdocumentation"
 
 #include "include/core/SkFontMgr.h"
+#include "include/core/SkPixmap.h"
 #include "include/core/SkSurface.h"
 
 #include "include/ports/SkFontMgr_mac_ct.h"
@@ -164,6 +166,62 @@ RNSkApplePlatformContext::resolveFontFamily(const std::string &familyName) {
 void RNSkApplePlatformContext::runOnMainThread(std::function<void()> func) {
   dispatch_async(dispatch_get_main_queue(), ^{
     func();
+  });
+}
+
+namespace {
+
+// A CGImage the image views set as their layer's contents (see
+// RNSkPresentedImages). Presents and discards are queued on the main queue in
+// the order they are made.
+class ApplePresentedBitmap : public PresentedBitmap {
+public:
+  // Takes ownership of `image`.
+  explicit ApplePresentedBitmap(CGImageRef image) : _image(image) {}
+
+  ~ApplePresentedBitmap() override { CGImageRelease(_image); }
+
+  void present(uint32_t id) override {
+    CGImageRef image = CGImageRetain(_image);
+    dispatch_async(dispatch_get_main_queue(), ^{
+      [SkiaPresentedImages publishImage:image forId:id];
+      CGImageRelease(image);
+    });
+  }
+
+private:
+  CGImageRef _image;
+};
+
+} // namespace
+
+std::shared_ptr<PresentedBitmap>
+RNSkApplePlatformContext::makePresentedBitmap(const SkPixmap &pixels) {
+  CFDataRef data =
+      CFDataCreate(nullptr, static_cast<const UInt8 *>(pixels.addr()),
+                   static_cast<CFIndex>(pixels.rowBytes() * pixels.height()));
+  if (data == nullptr) {
+    return nullptr;
+  }
+  CGDataProviderRef provider = CGDataProviderCreateWithCFData(data);
+  CFRelease(data);
+  CGColorSpaceRef colorSpace = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+  // Premultiplied RGBA, the byte order the pixels were read back in.
+  CGImageRef image = CGImageCreate(
+      pixels.width(), pixels.height(), 8, 32, pixels.rowBytes(), colorSpace,
+      kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big, provider,
+      nullptr, false, kCGRenderingIntentDefault);
+  CGColorSpaceRelease(colorSpace);
+  CGDataProviderRelease(provider);
+  if (image == nullptr) {
+    return nullptr;
+  }
+  return std::make_shared<ApplePresentedBitmap>(image);
+}
+
+void RNSkApplePlatformContext::discardPresentedBitmap(uint32_t id) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    [SkiaPresentedImages discardImageForId:id];
   });
 }
 

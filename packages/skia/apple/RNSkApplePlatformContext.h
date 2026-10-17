@@ -62,6 +62,11 @@ public:
 
   std::string resolveFontFamily(const std::string &familyName) override;
 
+  std::shared_ptr<PresentedBitmap>
+  makePresentedBitmap(const SkPixmap &pixels) override;
+
+  void discardPresentedBitmap(uint32_t id) override;
+
 private:
   bool _prefersP3ColorSpace = false;
 };

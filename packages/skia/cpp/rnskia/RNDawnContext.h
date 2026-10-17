@@ -87,11 +87,22 @@ public:
    */
   void readPixels(const sk_sp<SkImage> &image, const SkIRect &srcRect,
                   std::function<void(ReadResult)> callback) {
+    readPixels(image, srcRect,
+               image->imageInfo().makeDimensions(srcRect.size()),
+               std::move(callback));
+  }
+
+  /**
+   Same as readPixels(), into `info`, which has the size of `srcRect`: a color
+   type, alpha type or color space of the caller's rather than the image's.
+   */
+  void readPixels(const sk_sp<SkImage> &image, const SkIRect &srcRect,
+                  const SkImageInfo &info,
+                  std::function<void(ReadResult)> callback) {
     struct Request {
       std::function<void(ReadResult)> callback;
     };
     auto *request = new Request{std::move(callback)};
-    auto info = image->imageInfo().makeDimensions(srcRect.size());
     {
       std::lock_guard<std::mutex> lock(_mutex);
       _pendingReadbacks.fetch_add(1, std::memory_order_acq_rel);

@@ -71,6 +71,26 @@ export interface ISkiaViewApi {
    * the view owns its context; a no-op.
    */
   destroyGraphiteContext: (nativeId: number) => void;
+  /**
+   * The id a `<SkiaImageView>` shows an image by, the same for every view of
+   * one image. Native only.
+   */
+  presentedImageId: (image: SkImage) => number;
+  /**
+   * Keeps an image presentable while a `<SkiaImageView>` shows it. The first
+   * retain reads the image back and hands it to the platform as a bitmap,
+   * which every view showing the image draws. Native only.
+   */
+  retainPresentedImage: (image: SkImage) => void;
+  /**
+   * Gives back a retain, by id. The last one discards the bitmap. Native only.
+   */
+  releasePresentedImage: (id: number) => void;
+}
+
+export interface SkiaImageViewProps extends ViewProps {
+  /** The image the view shows, filling its bounds; null shows nothing. */
+  image: SkImage | null;
 }
 
 /** The props every Skia view takes, whichever way it is drawn. */
