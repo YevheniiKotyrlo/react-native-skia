@@ -32,7 +32,6 @@ public class SkiaSurfaceView extends SurfaceView implements SurfaceHolder.Callba
             SkiaSurfaceView.this.invalidate();
         }
     }, Build.VERSION.SDK_INT);
-    private boolean mRetired = false;
     private final boolean mZOrderOnTop;
     private final SurfaceHandOver mHandOver;
 
@@ -87,16 +86,6 @@ public class SkiaSurfaceView extends SurfaceView implements SurfaceHolder.Callba
         getHolder().setFormat(opaque ? PixelFormat.OPAQUE : PixelFormat.TRANSLUCENT);
     }
 
-    // The canvas moved to another view while this one stays attached and
-    // undrawn (BackingViewKind.retiresWhenReplaced): its surface leaves the
-    // renderer now, and the view reports nothing more and punches no hole in
-    // the window.
-    void retire() {
-        mApi.onSurfaceDestroyed();
-        mApi = SkiaViewAPI.DETACHED;
-        mRetired = true;
-    }
-
     // SurfaceView skips draw() and punches its hole in dispatchDraw.
     @Override
     protected void dispatchDraw(@NonNull Canvas canvas) {
@@ -109,7 +98,7 @@ public class SkiaSurfaceView extends SurfaceView implements SurfaceHolder.Callba
     // draw is reported, and the compositor skips the window there.
     @Override
     public boolean gatherTransparentRegion(@Nullable Region region) {
-        return mRetired || !mDrawGate.hasFrame() || super.gatherTransparentRegion(region);
+        return !mDrawGate.hasFrame() || super.gatherTransparentRegion(region);
     }
 
     @Override
