@@ -39,11 +39,11 @@ void RNSkGraphiteProducer::setTarget(
   {
     std::lock_guard<std::mutex> lock(_mutex);
     retiredTarget = std::exchange(_target, std::move(target));
-    // A held recording was made for the previous target, which never drops
+    // A deferred recording was made for the previous target, which never drops
     // one (see produce()).
-    if (_held != nullptr) {
-      retiredTarget->submit(std::move(_held));
-      _held = nullptr;
+    if (_deferred != nullptr) {
+      retiredTarget->submit(std::move(_deferred));
+      _deferred = nullptr;
     }
     // A frame still queued on the previous target is not coming through this
     // view anymore (the view unbound itself from it): do not wait for it.
@@ -132,9 +132,9 @@ void RNSkGraphiteProducer::onFramePresented(size_t presented) {
   // The view may present recordings that are not this producer's (a client
   // recording, the last frame shown again), hence the clamp.
   _queued = presented >= _queued ? 0 : _queued - presented;
-  if (_held != nullptr && _queued == 0) {
-    _target->submit(std::move(_held));
-    _held = nullptr;
+  if (_deferred != nullptr && _queued == 0) {
+    _target->submit(std::move(_deferred));
+    _deferred = nullptr;
     _queued = 1;
   }
   if (_dirty) {
@@ -157,7 +157,7 @@ bool RNSkGraphiteProducer::waitsForPresentLocked() const {
 }
 
 void RNSkGraphiteProducer::kickLocked() {
-  if (_inFlight || _held != nullptr || waitsForPresentLocked() ||
+  if (_inFlight || _deferred != nullptr || waitsForPresentLocked() ||
       _target == nullptr || (_recorder == nullptr && _picture == nullptr)) {
     return;
   }
@@ -212,7 +212,7 @@ void RNSkGraphiteProducer::produce() {
     if (target == _target && _queued > 0) {
       // The previous frame still waits for its vsync: this one goes to the
       // target once that one is presented (see onFramePresented()).
-      _held = std::move(recording);
+      _deferred = std::move(recording);
       return;
     }
     // Queued even if the view was bound to another target while this job

@@ -150,7 +150,8 @@ private:
     // the latch keeps every later frame waiting for one.
     const bool pipelined = android_get_device_api_level() >= __ANDROID_API_S__;
     // Every window's buffer queue makes a present wait, on the main thread
-    // that presents, until the GPU has finished the frame presented before.
+    // that presents, until the GPU has finished the frame presented before;
+    // a pipelined present can come that early, so it is held instead.
     _surface->setHoldsPresentForGpu(pipelined);
     // A TextureView takes a frame only when its window draws, on the main
     // thread that also presents. A present before that draw replaces the
