@@ -5,6 +5,8 @@
 #include "RNMetalLayerColorSpace.h"
 #include "utils/RNSkLog.h"
 
+#include <chrono>
+
 #ifdef __APPLE__
 #include "dawn/native/MetalBackend.h"
 #endif
@@ -21,6 +23,29 @@
 #pragma clang diagnostic pop
 
 namespace RNSkia {
+
+namespace {
+struct HoldProbe {
+  long holds = 0;
+  long waits = 0;
+  long heldPresents = 0;
+  long directPresents = 0;
+  std::chrono::steady_clock::time_point since = std::chrono::steady_clock::now();
+  void report() {
+    const auto now = std::chrono::steady_clock::now();
+    if (now - since < std::chrono::seconds(1)) {
+      return;
+    }
+    RNSkLogger::logToConsole("HOLDPROBE holds=%ld waits=%ld heldPresents=%ld directPresents=%ld", holds, waits, heldPresents, directPresents);
+    holds = 0;
+    waits = 0;
+    heldPresents = 0;
+    directPresents = 0;
+    since = now;
+  }
+};
+HoldProbe holdProbe;
+} // namespace
 
 RNSkWindowSurface::~RNSkWindowSurface() { detach(); }
 
@@ -291,8 +316,12 @@ bool RNSkWindowSurface::presentImage(const sk_sp<SkImage> &image) {
 void RNSkWindowSurface::presentOrHold() {
   if (_holdsPresentForGpu && !previousFrameDone()) {
     _presentHeld = true;
+    holdProbe.holds++;
+    holdProbe.report();
     return;
   }
+  holdProbe.directPresents++;
+  holdProbe.report();
   presentNow();
 }
 
@@ -301,9 +330,13 @@ RNSkWindowSurface::HeldFrame RNSkWindowSurface::presentHeldFrame() {
     return HeldFrame::None;
   }
   if (!previousFrameDone()) {
+    holdProbe.waits++;
+    holdProbe.report();
     return HeldFrame::Waiting;
   }
   _presentHeld = false;
+  holdProbe.heldPresents++;
+  holdProbe.report();
   presentNow();
   return HeldFrame::Presented;
 }
