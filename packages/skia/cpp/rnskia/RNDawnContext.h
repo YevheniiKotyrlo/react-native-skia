@@ -253,12 +253,14 @@ public:
   }
 
   /**
-   A future of everything submitted so far, to ask isWorkDone() about. Any
-   thread.
+   A future of everything submitted so far, to ask isWorkDone() about. Dawn
+   forgets it once the work is done, so one nobody asks about again (a frame
+   dropped with its surface) is not kept for the instance's lifetime, as a
+   WaitAnyOnly future would be. Any thread.
    */
   wgpu::Future trackSubmittedWork() {
     return backendContext.fDevice.GetQueue().OnSubmittedWorkDone(
-        wgpu::CallbackMode::WaitAnyOnly,
+        wgpu::CallbackMode::AllowSpontaneous,
         [](wgpu::QueueWorkDoneStatus, wgpu::StringView) {});
   }
 
