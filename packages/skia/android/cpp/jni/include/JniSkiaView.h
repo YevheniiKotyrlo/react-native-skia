@@ -147,7 +147,7 @@ private:
     // Before Android 12 SurfaceFlinger gives a SurfaceView's buffer back only
     // after compositing the next frame, so a pipelined present that misses
     // the latch keeps every later frame waiting for one.
-    const bool pipelined = android_get_device_api_level() >= __ANDROID_API_S__;
+    const bool pipelined = true;
     // A window's present waits, on the main thread that presents, until the
     // GPU has finished the frame presented before it; pipelined, a frame is
     // often replayed that early, so its present is held instead.
