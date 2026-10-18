@@ -15,7 +15,16 @@ namespace RNSkia {
 namespace jsi = facebook::jsi;
 
 class Recorder;
+class RNSkGraphiteRecording;
 class RNSkGraphiteTarget;
+
+/** When a view's next replay may start (see RNSkGraphiteProducer). */
+enum class ReplayPacing {
+  // Once the previous recording is presented.
+  AfterPresent,
+  // As soon as the previous replay has finished.
+  Pipelined,
+};
 
 /**
  * Records the declarative content of a view (a Recorder handed over by
@@ -30,16 +39,21 @@ class RNSkGraphiteTarget;
  * target and submits the recording; the main thread presents it on the next
  * vsync.
  *
- * Pacing: a view has at most one job in flight, and the pool keeps at most one
- * frame ahead of the display: a job may start while the previous recording is
- * still waiting for its vsync, so that the replay of one frame overlaps the
- * present of the other, but not while two are waiting. Updates that arrive
+ * Pacing: a view has at most one job in flight and keeps at most one frame
+ * ahead of the display. Pipelined, the default, a job may start while the
+ * previous recording still waits for its vsync, so that the replay of one
+ * frame overlaps the present of the other: on a Vulkan window the present
+ * alone takes two to three milliseconds of the main thread, so a replay that
+ * only started once the frame was on screen missed every other vsync at
+ * 120 Hz. A recording that finishes while the previous one still waits is
+ * held here and submitted once that one is presented, and no job starts
+ * while one is held: a present replays every queued recording, so a second
+ * one of this view would be drawn and never shown. After present, the next
+ * job starts once the previous recording is presented. Updates that arrive
  * meanwhile only mark the content dirty; the next job (started by the update,
  * by the end of the job before, or by a presented frame) picks them up. A
  * producer that outruns the display therefore records once per vsync, and
- * the queue of the target never grows. On a Vulkan window the present alone
- * takes two to three milliseconds of the main thread, so a replay that only
- * started once the frame was on screen missed every other vsync at 120 Hz.
+ * the queue of the target never holds more than one of its recordings.
  */
 class RNSkGraphiteProducer
     : public std::enable_shared_from_this<RNSkGraphiteProducer> {
@@ -94,9 +108,12 @@ public:
 
   /**
    The view presented `presented` recordings (every one it had taken from the
-   queue): as many slots free up for the next jobs.
+   queue): a held recording goes to the target, and the next job may start.
    */
   void onFramePresented(size_t presented);
+
+  /** When the next replay may start. Any thread. */
+  void setPacing(ReplayPacing pacing);
 
   /**
    Replays the current content into a canvas, on the calling thread (a
@@ -121,6 +138,7 @@ private:
   void replaceContent(std::shared_ptr<Recorder> recorder,
                       sk_sp<SkPicture> picture, bool dirty);
   void kickLocked();
+  bool waitsForPresentLocked() const;
   void produce();
 
   // Content and scheduling state.
@@ -128,12 +146,13 @@ private:
   std::shared_ptr<RNSkGraphiteTarget> _target;
   std::shared_ptr<Recorder> _recorder;
   sk_sp<SkPicture> _picture;
-  // Recordings submitted to the current target and not presented yet. A job
-  // starts while there is room for its recording in the queue.
-  static constexpr size_t kMaxQueued = 2;
   bool _dirty = false;
   bool _inFlight = false;
+  // Recordings submitted to the current target and not presented yet: one at
+  // most, the next one waits in _held (see produce()).
   size_t _queued = 0;
+  ReplayPacing _pacing = ReplayPacing::Pipelined;
+  std::shared_ptr<RNSkGraphiteRecording> _held;
 };
 
 } // namespace RNSkia
