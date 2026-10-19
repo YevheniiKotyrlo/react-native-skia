@@ -144,6 +144,7 @@ private:
   sk_sp<SkPicture> _picture;
   bool _dirty = false;
   RNSkReplaySchedule<std::shared_ptr<RNSkGraphiteRecording>> _schedule;
+  ReplayPacing _lastProbedPacing = ReplayPacing::kAfterPresent;
 };
 
 } // namespace RNSkia

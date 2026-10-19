@@ -5,6 +5,8 @@
 #include <memory>
 #include <utility>
 
+#include <chrono>
+
 #include "RNSkGraphiteTarget.h"
 #include "RNSkThreadPool.h"
 #include "api/recorder/DrawingCtx.h"
@@ -138,9 +140,30 @@ void RNSkGraphiteProducer::onRecordingsPresented(
   }
 }
 
+namespace {
+struct PaceProbe {
+  long ticks = 0;
+  long pipelinedTicks = 0;
+  long switches = 0;
+  std::chrono::steady_clock::time_point since = std::chrono::steady_clock::now();
+};
+PaceProbe paceProbe;
+} // namespace
+
 void RNSkGraphiteProducer::onPresentTick() {
   std::lock_guard<std::mutex> lock(_mutex);
+  const auto before = _schedule.pacing();
   _schedule.presentTick();
+  const auto after = _schedule.pacing();
+  paceProbe.ticks++;
+  paceProbe.pipelinedTicks += after == ReplayPacing::kPipelined ? 1 : 0;
+  paceProbe.switches += before != after || _lastProbedPacing != before ? 1 : 0;
+  _lastProbedPacing = after;
+  const auto now = std::chrono::steady_clock::now();
+  if (now - paceProbe.since >= std::chrono::seconds(1)) {
+    RNSkLogger::logToConsole("PACEPROBE ticks=%ld pipelinedTicks=%ld switches=%ld", paceProbe.ticks, paceProbe.pipelinedTicks, paceProbe.switches);
+    paceProbe = PaceProbe();
+  }
 }
 
 bool RNSkGraphiteProducer::isReplaying() {
