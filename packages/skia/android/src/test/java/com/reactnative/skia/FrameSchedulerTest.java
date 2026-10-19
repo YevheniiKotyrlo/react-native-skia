@@ -67,9 +67,11 @@ public class FrameSchedulerTest {
         mScheduler.onFrame(kind, mHost.nowNanos);
     }
 
-    // Two frames a vsync apart ask a TextureView for presents, the second's
-    // still posted: the view has seen its vsync interval.
+    // Two frames a vsync apart ask a TextureView for presents while a replay is
+    // in flight, the second's still posted: the view ticks, and has seen its
+    // vsync interval.
     private void tickTwice() {
+        mHost.nextFrames.add(FrameScheduler.NextFrame.COMING);
         frame(BackingViewKind.TEXTURE_VIEW);
         mScheduler.onPosted();
         mHost.nowNanos += FRAME_INTERVAL_NANOS;
@@ -308,15 +310,22 @@ public class FrameSchedulerTest {
     }
 
     @Test
-    public void aVsyncPresentIsNeverLateBeforeTwoFramesShowedTheInterval() {
+    public void aPresentIsNeverLateBeforeTwoFramesShowedTheInterval() {
+        mHost.nextFrames.add(FrameScheduler.NextFrame.COMING);
+        mScheduler.requestFrame(BackingViewKind.TEXTURE_VIEW);
+        mScheduler.onPosted();
         frame(BackingViewKind.TEXTURE_VIEW);
         mHost.nowNanos += 10 * FRAME_INTERVAL_NANOS;
         mScheduler.onPosted();
-        assertEquals(Arrays.asList(Call.POST_BEHIND_PENDING_DRAW, Call.PRESENT_ON_VSYNC), mHost.takeCalls());
+        assertEquals(
+                Arrays.asList(Call.POST_BEHIND_PENDING_DRAW, Call.PRESENT_ON_REQUEST, Call.POST_FRAME_CALLBACK,
+                        Call.POST_BEHIND_PENDING_DRAW, Call.PRESENT_ON_VSYNC),
+                mHost.takeCalls());
     }
 
     @Test
     public void framesAnIdleGapApartShowNoShorterInterval() {
+        mHost.nextFrames.add(FrameScheduler.NextFrame.COMING);
         frame(BackingViewKind.TEXTURE_VIEW);
         mScheduler.onPosted();
         mHost.nowNanos += 100 * FRAME_INTERVAL_NANOS;
@@ -324,13 +333,43 @@ public class FrameSchedulerTest {
         mHost.nowNanos += FRAME_INTERVAL_NANOS;
         mScheduler.onPosted();
         assertEquals(
-                Arrays.asList(Call.POST_BEHIND_PENDING_DRAW, Call.PRESENT_ON_VSYNC, Call.POST_BEHIND_PENDING_DRAW,
-                        Call.PRESENT_ON_VSYNC),
+                Arrays.asList(Call.POST_BEHIND_PENDING_DRAW, Call.PRESENT_ON_VSYNC, Call.POST_FRAME_CALLBACK,
+                        Call.POST_BEHIND_PENDING_DRAW, Call.PRESENT_ON_VSYNC),
                 mHost.takeCalls());
     }
 
     @Test
-    public void aSubmittedRecordingsPresentIsNeverDeferred() {
+    public void aSubmittedRecordingsPresentIsDeferredWhileTheViewTicks() {
+        tickTwice();
+        mHost.nextFrames.add(FrameScheduler.NextFrame.COMING);
+        mScheduler.onPosted();
+        mHost.takeCalls();
+
+        mScheduler.requestFrame(BackingViewKind.TEXTURE_VIEW);
+        mHost.nowNanos += FRAME_INTERVAL_NANOS;
+        mScheduler.onPosted();
+        assertEquals(Arrays.asList(Call.POST_BEHIND_PENDING_DRAW, Call.POST_BEHIND_PENDING_DRAW), mHost.takeCalls());
+    }
+
+    @Test
+    public void aFrameWaitingKeepsTheViewTicking() {
+        mHost.nextFrames.add(FrameScheduler.NextFrame.WAITING);
+        mHost.nextFrames.add(FrameScheduler.NextFrame.WAITING);
+        mScheduler.requestFrame(BackingViewKind.TEXTURE_VIEW);
+        mScheduler.onPosted();
+        frame(BackingViewKind.TEXTURE_VIEW);
+        mScheduler.onPosted();
+        mHost.nowNanos += FRAME_INTERVAL_NANOS;
+        frame(BackingViewKind.TEXTURE_VIEW);
+        mHost.takeCalls();
+
+        mHost.nowNanos += FRAME_INTERVAL_NANOS;
+        mScheduler.onPosted();
+        assertEquals(Arrays.asList(Call.POST_FRAME_CALLBACK, Call.POST_BEHIND_PENDING_DRAW), mHost.takeCalls());
+    }
+
+    @Test
+    public void aPresentOnceTheViewStoppedTickingIsNeverDeferred() {
         tickTwice();
         mScheduler.onPosted();
         mHost.takeCalls();
@@ -366,6 +405,7 @@ public class FrameSchedulerTest {
     @Test
     public void aDeferralIsForOnePresentOnly() {
         tickTwice();
+        mHost.nextFrames.add(FrameScheduler.NextFrame.COMING);
         mHost.nowNanos += FRAME_INTERVAL_NANOS;
         mScheduler.onPosted();
         frame(BackingViewKind.TEXTURE_VIEW);
@@ -382,42 +422,30 @@ public class FrameSchedulerTest {
     }
 
     @Test
-    public void cancelForgetsThatAPresentWasDeferred() {
+    public void cancelStopsTheTicking() {
         tickTwice();
-        mHost.nowNanos += FRAME_INTERVAL_NANOS;
-        mScheduler.onPosted();
         mScheduler.cancel();
-        mHost.takeCalls();
-
-        frame(BackingViewKind.TEXTURE_VIEW);
-        mHost.nowNanos += FRAME_INTERVAL_NANOS;
-        frame(BackingViewKind.TEXTURE_VIEW);
-        mHost.nowNanos += FRAME_INTERVAL_NANOS;
+        mScheduler.requestFrame(BackingViewKind.TEXTURE_VIEW);
+        mHost.nowNanos += 10 * FRAME_INTERVAL_NANOS;
         mScheduler.onPosted();
-        assertEquals(
-                Arrays.asList(Call.POST_BEHIND_PENDING_DRAW, Call.POST_FRAME_CALLBACK, Call.POST_BEHIND_PENDING_DRAW),
-                mHost.takeCalls());
+        assertEquals(Arrays.asList(Call.POST_BEHIND_PENDING_DRAW, Call.PRESENT_ON_REQUEST), mHost.takeCalls());
     }
 
     @Test
     public void cancelForgetsTheLastFrame() {
         tickTwice();
         mScheduler.cancel();
+        mHost.nextFrames.add(FrameScheduler.NextFrame.COMING);
+        mScheduler.requestFrame(BackingViewKind.TEXTURE_VIEW);
+        mScheduler.onPosted();
         mHost.nowNanos += FRAME_INTERVAL_NANOS / 2;
         frame(BackingViewKind.TEXTURE_VIEW);
         mHost.nowNanos += FRAME_INTERVAL_NANOS / 2;
         mScheduler.onPosted();
-        assertEquals(Arrays.asList(Call.POST_BEHIND_PENDING_DRAW, Call.PRESENT_ON_VSYNC), mHost.takeCalls());
-    }
-
-    @Test
-    public void cancelForgetsTheInterval() {
-        tickTwice();
-        mScheduler.cancel();
-        frame(BackingViewKind.TEXTURE_VIEW);
-        mHost.nowNanos += FRAME_INTERVAL_NANOS;
-        mScheduler.onPosted();
-        assertEquals(Arrays.asList(Call.POST_BEHIND_PENDING_DRAW, Call.PRESENT_ON_VSYNC), mHost.takeCalls());
+        assertEquals(
+                Arrays.asList(Call.POST_BEHIND_PENDING_DRAW, Call.PRESENT_ON_REQUEST, Call.POST_FRAME_CALLBACK,
+                        Call.POST_BEHIND_PENDING_DRAW, Call.PRESENT_ON_VSYNC),
+                mHost.takeCalls());
     }
 
     @Test
