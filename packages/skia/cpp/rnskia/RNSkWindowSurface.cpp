@@ -365,6 +365,11 @@ HeldFrame RNSkWindowSurface::presentHeldFrame() {
 
 void RNSkWindowSurface::presentNow() {
   _surface.Present();
+#ifdef __ANDROID__
+  auto flushCommands = _device.CreateCommandEncoder().Finish();
+  _device.GetQueue().Submit(1, &flushCommands);
+  traceMark("rnskia flush");
+#endif
   didPresent();
 }
 
