@@ -382,8 +382,10 @@ bool RNSkWindowSurface::DawnQueue::isDone(const Work &work) {
 #ifdef __ANDROID__
   traceMark(std::string(done ? "rnskia isDone=1 #" : "rnskia isDone=0 #") +
             std::to_string(work.id));
-#endif
+  return true;
+#else
   return done;
+#endif
 }
 
 } // namespace RNSkia
