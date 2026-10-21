@@ -6,11 +6,8 @@ import androidx.annotation.Nullable;
  * Decides when a SkiaView presents the recordings queued for it: a SurfaceView
  * on the next vsync, a TextureView behind the draw its window has pending, so
  * that the window has taken the previous frame by then. While a replay is in
- * flight it asks for every vsync, whose present paces the replays. A vsync's
- * present that the main thread reaches only once the next vsync has come goes
- * behind that frame's draw, once, so that the window's frame never waits for
- * it. Keeps at most one frame callback and one posted present outstanding.
- * Main thread.
+ * flight it asks for every vsync, whose present paces the replays. Keeps at
+ * most one frame callback and one posted present outstanding. Main thread.
  */
 final class FrameScheduler {
     /** What the view still needs after a present. */
@@ -42,32 +39,19 @@ final class FrameScheduler {
         void postBehindPendingDraw();
 
         /**
-         * Presents what is waiting. vsyncs is how many vsyncs asked for this
-         * present: none for the one a submitted recording asked for.
+         * Presents what is waiting. onVsync tells the present a vsync asked for
+         * from one a submitted recording asked for.
          */
-        NextFrame presentFrame(int vsyncs);
-
-        /** Now, on the clock of Choreographer's frame times. */
-        long nowNanos();
+        NextFrame presentFrame(boolean onVsync);
     }
-
-    // Before two frames have asked the view for a present, no present is late.
-    private static final long UNKNOWN_FRAME_INTERVAL_NANOS = Long.MAX_VALUE;
 
     private final Host mHost;
     private boolean mFrameCallbackPosted = false;
     // Whether the frame callback outstanding retries a frame that is waiting.
     private boolean mRetryPosted = false;
     private boolean mPresentPosted = false;
-    // How many vsyncs asked for the posted present, and whether it already
-    // went behind a later frame's draw.
-    private int mPostedPresentVsyncs = 0;
-    private boolean mPostedPresentDeferred = false;
-    // The frame time of the last frame that asked for a present, and how long
-    // after the one before it that frame came: the vsync interval the view gets.
-    private boolean mHasFrameTime = false;
-    private long mLastFrameTimeNanos = 0;
-    private long mFrameIntervalNanos = UNKNOWN_FRAME_INTERVAL_NANOS;
+    // Whether the posted present is the one a vsync asked for.
+    private boolean mPostedPresentOnVsync = false;
 
     FrameScheduler(Host host) {
         mHost = host;
@@ -86,44 +70,30 @@ final class FrameScheduler {
         if (presentsOnVsync(kind)) {
             postFrameCallback();
         } else {
-            postBehindPendingDraw(0);
+            postBehindPendingDraw(false);
         }
     }
 
-    /** The Choreographer frame asked for with Host.postFrameCallback(), at frameTimeNanos. */
-    void onFrame(@Nullable BackingViewKind kind, long frameTimeNanos) {
+    /** The Choreographer frame asked for with Host.postFrameCallback(). */
+    void onFrame(@Nullable BackingViewKind kind) {
         mFrameCallbackPosted = false;
         mRetryPosted = false;
-        if (mHasFrameTime) {
-            mFrameIntervalNanos = frameTimeNanos - mLastFrameTimeNanos;
-        }
-        mHasFrameTime = true;
-        mLastFrameTimeNanos = frameTimeNanos;
         if (kind == null) {
             return;
         }
         if (presentsOnVsync(kind)) {
-            present(1);
+            present(true);
         } else {
-            postBehindPendingDraw(1);
+            postBehindPendingDraw(true);
         }
     }
 
     /** The message posted with Host.postBehindPendingDraw(). */
     void onPosted() {
         mPresentPosted = false;
-        if (mPostedPresentVsyncs > 0 && !mPostedPresentDeferred && isNextVsyncDue()) {
-            // The window's next frame waits behind this message: the present
-            // goes behind that frame's draw, which asks for a present too.
-            mPostedPresentDeferred = true;
-            postFrameCallback();
-            postBehindPendingDraw(0);
-            return;
-        }
-        int vsyncs = mPostedPresentVsyncs;
-        mPostedPresentVsyncs = 0;
-        mPostedPresentDeferred = false;
-        present(vsyncs);
+        boolean onVsync = mPostedPresentOnVsync;
+        mPostedPresentOnVsync = false;
+        present(onVsync);
     }
 
     /** The view left its window, and the host removed both callbacks. */
@@ -131,10 +101,7 @@ final class FrameScheduler {
         mFrameCallbackPosted = false;
         mRetryPosted = false;
         mPresentPosted = false;
-        mPostedPresentVsyncs = 0;
-        mPostedPresentDeferred = false;
-        mHasFrameTime = false;
-        mFrameIntervalNanos = UNKNOWN_FRAME_INTERVAL_NANOS;
+        mPostedPresentOnVsync = false;
     }
 
     // The compositor takes a SurfaceView's buffer at the vsync. A TextureView's frame
@@ -146,16 +113,11 @@ final class FrameScheduler {
         };
     }
 
-    // The vsync after the one that last asked for the posted present has come.
-    private boolean isNextVsyncDue() {
-        return mHost.nowNanos() - mLastFrameTimeNanos >= mFrameIntervalNanos;
-    }
-
     // A frame still waiting (the present failed, or more were submitted
     // meanwhile) is tried again on the next vsync, never straight away; a frame
     // coming keeps the vsync asked for.
-    private void present(int vsyncs) {
-        switch (mHost.presentFrame(vsyncs)) {
+    private void present(boolean onVsync) {
+        switch (mHost.presentFrame(onVsync)) {
             case NONE -> mRetryPosted = false;
             case WAITING -> {
                 mRetryPosted = true;
@@ -175,8 +137,8 @@ final class FrameScheduler {
         }
     }
 
-    private void postBehindPendingDraw(int vsyncs) {
-        mPostedPresentVsyncs += vsyncs;
+    private void postBehindPendingDraw(boolean onVsync) {
+        mPostedPresentOnVsync = mPostedPresentOnVsync || onVsync;
         if (!mPresentPosted) {
             mPresentPosted = true;
             mHost.postBehindPendingDraw();

@@ -63,15 +63,10 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
         }
 
         @Override
-        public FrameScheduler.NextFrame presentFrame(int vsyncs) {
+        public FrameScheduler.NextFrame presentFrame(boolean onVsync) {
             return hasNativeView()
-                    ? FrameScheduler.NextFrame.fromNative(SkiaView.this.presentFrame(vsyncs))
+                    ? FrameScheduler.NextFrame.fromNative(SkiaView.this.presentFrame(onVsync))
                     : FrameScheduler.NextFrame.NONE;
-        }
-
-        @Override
-        public long nowNanos() {
-            return System.nanoTime();
         }
     });
 
@@ -285,7 +280,7 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
 
     @Override
     public void doFrame(long frameTimeNanos) {
-        mFrameScheduler.onFrame(mKind, frameTimeNanos);
+        mFrameScheduler.onFrame(mKind);
     }
 
     private void onPostedPresent() {
@@ -389,11 +384,10 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
     private native void unregisterView();
 
     /**
-     * Presents what is waiting, for vsyncs vsyncs, and returns the value of
-     * RNSkView::NextFrame: whether a frame is still waiting or coming (see
-     * FrameScheduler.NextFrame).
+     * Presents what is waiting, and returns the value of RNSkView::NextFrame:
+     * whether a frame is still waiting or coming (see FrameScheduler.NextFrame).
      */
-    private native int presentFrame(int vsyncs);
+    private native int presentFrame(boolean onVsync);
 
     private native void frameLatched();
 }
