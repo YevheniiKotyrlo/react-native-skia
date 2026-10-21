@@ -345,6 +345,9 @@ bool RNSkWindowSurface::presentRecordings(
   DawnContext::getInstance().insertRecordings(recordings, surface.get());
 #ifdef __ANDROID__
   traceEnd();
+  auto renderWork = DawnContext::getInstance().trackSubmittedWork();
+  traceMark("rnskia render-track #" + std::to_string(renderWork.id));
+  gpuDoneWatcher().watch(renderWork);
 #endif
 #ifdef __APPLE__
   dawn::native::metal::WaitForCommandsToBeScheduled(_device.Get());
