@@ -51,14 +51,6 @@ final class FrameScheduler {
         long nowNanos();
     }
 
-    /** The present posted with Host.postBehindPendingDraw(), if any. */
-    private enum PostedPresent {
-        NONE,
-        POSTED,
-        /** It already went behind a later frame's draw. */
-        DEFERRED
-    }
-
     // Before two frames have asked the view for a present, no present is late.
     private static final long UNKNOWN_FRAME_INTERVAL_NANOS = Long.MAX_VALUE;
 
@@ -66,12 +58,11 @@ final class FrameScheduler {
     private boolean mFrameCallbackPosted = false;
     // Whether the frame callback outstanding retries a frame that is waiting.
     private boolean mRetryPosted = false;
-    private PostedPresent mPostedPresent = PostedPresent.NONE;
-    // How many vsyncs asked for the posted present.
+    private boolean mPresentPosted = false;
+    // How many vsyncs asked for the posted present, and whether it already
+    // went behind a later frame's draw.
     private int mPostedPresentVsyncs = 0;
-    // Whether the view asked for the next vsync after its last present, so
-    // that its frame times are the vsyncs it gets.
-    private boolean mTicking = false;
+    private boolean mPostedPresentDeferred = false;
     // The frame time of the last frame that asked for a present, and how long
     // after the one before it that frame came: the vsync interval the view gets.
     private boolean mHasFrameTime = false;
@@ -120,17 +111,18 @@ final class FrameScheduler {
 
     /** The message posted with Host.postBehindPendingDraw(). */
     void onPosted() {
-        PostedPresent posted = mPostedPresent;
-        mPostedPresent = PostedPresent.NONE;
-        if (posted == PostedPresent.POSTED && mTicking && isNextVsyncDue()) {
+        mPresentPosted = false;
+        if (mPostedPresentVsyncs > 0 && !mPostedPresentDeferred && isNextVsyncDue()) {
             // The window's next frame waits behind this message: the present
             // goes behind that frame's draw, which asks for a present too.
+            mPostedPresentDeferred = true;
             postFrameCallback();
-            post(PostedPresent.DEFERRED);
+            postBehindPendingDraw(0);
             return;
         }
         int vsyncs = mPostedPresentVsyncs;
         mPostedPresentVsyncs = 0;
+        mPostedPresentDeferred = false;
         present(vsyncs);
     }
 
@@ -138,10 +130,11 @@ final class FrameScheduler {
     void cancel() {
         mFrameCallbackPosted = false;
         mRetryPosted = false;
-        mPostedPresent = PostedPresent.NONE;
+        mPresentPosted = false;
         mPostedPresentVsyncs = 0;
-        mTicking = false;
+        mPostedPresentDeferred = false;
         mHasFrameTime = false;
+        mFrameIntervalNanos = UNKNOWN_FRAME_INTERVAL_NANOS;
     }
 
     // The compositor takes a SurfaceView's buffer at the vsync. A TextureView's frame
@@ -153,7 +146,7 @@ final class FrameScheduler {
         };
     }
 
-    // The vsync after the view's last frame has come.
+    // The vsync after the one that last asked for the posted present has come.
     private boolean isNextVsyncDue() {
         return mHost.nowNanos() - mLastFrameTimeNanos >= mFrameIntervalNanos;
     }
@@ -163,18 +156,13 @@ final class FrameScheduler {
     // coming keeps the vsync asked for.
     private void present(int vsyncs) {
         switch (mHost.presentFrame(vsyncs)) {
-            case NONE -> {
-                mRetryPosted = false;
-                mTicking = false;
-            }
+            case NONE -> mRetryPosted = false;
             case WAITING -> {
                 mRetryPosted = true;
-                mTicking = true;
                 postFrameCallback();
             }
             case COMING -> {
                 mRetryPosted = false;
-                mTicking = true;
                 postFrameCallback();
             }
         }
@@ -189,13 +177,9 @@ final class FrameScheduler {
 
     private void postBehindPendingDraw(int vsyncs) {
         mPostedPresentVsyncs += vsyncs;
-        if (mPostedPresent == PostedPresent.NONE) {
-            post(PostedPresent.POSTED);
+        if (!mPresentPosted) {
+            mPresentPosted = true;
+            mHost.postBehindPendingDraw();
         }
-    }
-
-    private void post(PostedPresent posted) {
-        mPostedPresent = posted;
-        mHost.postBehindPendingDraw();
     }
 }
