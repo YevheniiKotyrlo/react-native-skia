@@ -10,8 +10,9 @@
 #endif
 
 #ifdef __ANDROID__
-#include <android/trace.h>
+#include <fcntl.h>
 #include <pthread.h>
+#include <unistd.h>
 
 #include <chrono>
 #include <deque>
@@ -35,9 +36,33 @@ namespace RNSkia {
 #ifdef __ANDROID__
 namespace {
 
+// Android 10 drops a release app's ATrace sections unless the app is
+// profileable, so the probe writes the kernel's trace marker itself.
+int traceMarker() {
+  static const int fd = [] {
+    int opened = open("/sys/kernel/tracing/trace_marker", O_WRONLY | O_CLOEXEC);
+    return opened >= 0 ? opened
+                       : open("/sys/kernel/debug/tracing/trace_marker",
+                              O_WRONLY | O_CLOEXEC);
+  }();
+  return fd;
+}
+
+void traceWrite(const std::string &line) {
+  if (traceMarker() >= 0) {
+    (void)write(traceMarker(), line.data(), line.size());
+  }
+}
+
+void traceBegin(const std::string &name) {
+  traceWrite("B|" + std::to_string(getpid()) + "|" + name);
+}
+
+void traceEnd() { traceWrite("E|" + std::to_string(getpid())); }
+
 void traceMark(const std::string &name) {
-  ATrace_beginSection(name.c_str());
-  ATrace_endSection();
+  traceBegin(name);
+  traceEnd();
 }
 
 class GpuDoneWatcher {
@@ -315,11 +340,11 @@ bool RNSkWindowSurface::presentRecordings(
   // A recording Graphite rejects is logged there and dropped: it would be
   // rejected again on every frame, and the frames behind it would never come.
 #ifdef __ANDROID__
-  ATrace_beginSection("rnskia replay");
+  traceBegin("rnskia replay");
 #endif
   DawnContext::getInstance().insertRecordings(recordings, surface.get());
 #ifdef __ANDROID__
-  ATrace_endSection();
+  traceEnd();
 #endif
 #ifdef __APPLE__
   dawn::native::metal::WaitForCommandsToBeScheduled(_device.Get());
