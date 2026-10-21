@@ -10,9 +10,8 @@
 #endif
 
 #ifdef __ANDROID__
-#include <fcntl.h>
+#include <android/trace.h>
 #include <pthread.h>
-#include <unistd.h>
 
 #include <chrono>
 #include <deque>
@@ -36,29 +35,10 @@ namespace RNSkia {
 #ifdef __ANDROID__
 namespace {
 
-// Android 10 drops a release app's ATrace sections unless the app is
-// profileable, so the probe writes the kernel's trace marker itself.
-int traceMarker() {
-  static const int fd = [] {
-    int opened = open("/sys/kernel/tracing/trace_marker", O_WRONLY | O_CLOEXEC);
-    return opened >= 0 ? opened
-                       : open("/sys/kernel/debug/tracing/trace_marker",
-                              O_WRONLY | O_CLOEXEC);
-  }();
-  return fd;
-}
+// A release app's sections reach the trace only when it is profileable.
+void traceBegin(const std::string &name) { ATrace_beginSection(name.c_str()); }
 
-void traceWrite(const std::string &line) {
-  if (traceMarker() >= 0) {
-    (void)write(traceMarker(), line.data(), line.size());
-  }
-}
-
-void traceBegin(const std::string &name) {
-  traceWrite("B|" + std::to_string(getpid()) + "|" + name);
-}
-
-void traceEnd() { traceWrite("E|" + std::to_string(getpid())); }
+void traceEnd() { ATrace_endSection(); }
 
 void traceMark(const std::string &name) {
   traceBegin(name);
