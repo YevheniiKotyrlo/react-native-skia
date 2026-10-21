@@ -30,7 +30,8 @@ namespace RNSkia {
  * (attach, resize, detach); everything else lives here.
  *
  * Threading: the window is attached, resized, detached and presented on the
- * main thread. The description of its target texture is kept in a copy of
+ * present thread (RNSkPlatformContext::runOnPresentThread). The description
+ * of its target texture is kept in a copy of
  * its own, so that whoever records for the view (the JS thread, a worklet
  * runtime, the render thread pool) can read it from any thread, also before
  * the window exists (see getLayoutSize).
@@ -75,7 +76,7 @@ public:
    */
   void detach();
 
-  /** Whether a window is attached. Main thread. */
+  /** Whether a window is attached. Present thread. */
   bool isAttached() const { return _surface != nullptr; }
 
   /**
@@ -145,13 +146,14 @@ public:
 
   /**
    Presents the frame the window holds for the GPU once the GPU has finished
-   the frame presented before it, without waiting for the GPU. Main thread.
+   the frame presented before it, without waiting for the GPU. Present
+   thread.
    */
   HeldFrame presentHeldFrame();
 
   /**
    Whether the window holds a frame for the GPU: it takes no other frame
-   meanwhile. Main thread.
+   meanwhile. Present thread.
    */
   bool hasHeldFrame() const { return _presentHold.hasHeldFrame(); }
 
@@ -209,7 +211,7 @@ private:
 
   wgpu::Device _device;
   wgpu::Surface _surface;
-  // The recorder of the thread the window is attached on (the main thread):
+  // The recorder of the thread the window is attached on (the present thread):
   // presentImage() draws on it, presentRecordings() only wraps the swapchain
   // texture for it.
   skgpu::graphite::Recorder *_recorder = nullptr;
@@ -223,7 +225,7 @@ private:
   bool _useP3ColorSpace = false;
 
   // A copy of the window's target description, readable from any thread
-  // while the window itself belongs to the main thread.
+  // while the window itself belongs to the present thread.
   std::mutex _targetInfoMutex;
   RNSkGraphiteTargetInfo _targetInfo;
   bool _hasTargetInfo = false;
@@ -236,7 +238,7 @@ private:
   std::function<void()> _requestRedraw;
   std::function<bool()> _canPresent;
   std::function<void()> _didPresent;
-  // Main thread.
+  // Present thread.
   RNSkPresentHold<DawnQueue> _presentHold;
 };
 

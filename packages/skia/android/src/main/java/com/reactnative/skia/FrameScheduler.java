@@ -4,10 +4,11 @@ import androidx.annotation.Nullable;
 
 /**
  * Decides when a SkiaView presents the recordings queued for it: a SurfaceView
- * on the next vsync, a TextureView behind the draw its window has pending, so
- * that the window has taken the previous frame by then. While a replay is in
- * flight it asks for every vsync, whose present paces the replays. Keeps at
- * most one frame callback and one posted present outstanding. Main thread.
+ * on the next vsync, a TextureView as soon as the present thread gets to it,
+ * once its window has drawn the previous frame (the latch gate, see
+ * JniSkiaView::frameLatched). While a replay is in flight it asks for every
+ * vsync, whose present paces the replays. Keeps at most one frame callback and
+ * one posted present outstanding. Present thread (see PresentThread).
  */
 final class FrameScheduler {
     /** What the view still needs after a present. */
@@ -35,8 +36,8 @@ final class FrameScheduler {
         /** Calls onFrame() on the next Choreographer frame. */
         void postFrameCallback();
 
-        /** Calls onPosted() from the main looper, behind any draw the window has pending. */
-        void postBehindPendingDraw();
+        /** Calls onPosted() from the present thread's looper. */
+        void postPresent();
 
         /**
          * Presents what is waiting. onVsync tells the present a vsync asked for
@@ -70,7 +71,7 @@ final class FrameScheduler {
         if (presentsOnVsync(kind)) {
             postFrameCallback();
         } else {
-            postBehindPendingDraw(false);
+            postPresent(false);
         }
     }
 
@@ -84,11 +85,11 @@ final class FrameScheduler {
         if (presentsOnVsync(kind)) {
             present(true);
         } else {
-            postBehindPendingDraw(true);
+            postPresent(true);
         }
     }
 
-    /** The message posted with Host.postBehindPendingDraw(). */
+    /** The message posted with Host.postPresent(). */
     void onPosted() {
         mPresentPosted = false;
         boolean onVsync = mPostedPresentOnVsync;
@@ -137,11 +138,11 @@ final class FrameScheduler {
         }
     }
 
-    private void postBehindPendingDraw(boolean onVsync) {
+    private void postPresent(boolean onVsync) {
         mPostedPresentOnVsync = mPostedPresentOnVsync || onVsync;
         if (!mPresentPosted) {
             mPresentPosted = true;
-            mHost.postBehindPendingDraw();
+            mHost.postPresent();
         }
     }
 }

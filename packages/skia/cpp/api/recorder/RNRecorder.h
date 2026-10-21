@@ -164,10 +164,10 @@ public:
     auto context = _context;
     auto pendingCommands = std::make_shared<CommandList>(std::move(commands));
 
-    context->runOnMainThread(
+    context->runOnPresentThread(
         [pendingCommands = std::move(pendingCommands)]() mutable {
-          // Destroy the recorded commands on the main thread to ensure GPU
-          // backed resources release safely.
+          // Destroy the recorded commands on the thread views present on to
+          // ensure GPU backed resources release safely.
           pendingCommands->clear();
         });
   }

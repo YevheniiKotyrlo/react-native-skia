@@ -13,7 +13,7 @@ import org.junit.Test;
 public class FrameSchedulerTest {
     private enum Call {
         POST_FRAME_CALLBACK,
-        POST_BEHIND_PENDING_DRAW,
+        POST_PRESENT,
         PRESENT_ON_VSYNC,
         PRESENT_ON_REQUEST
     }
@@ -28,8 +28,8 @@ public class FrameSchedulerTest {
         }
 
         @Override
-        public void postBehindPendingDraw() {
-            calls.add(Call.POST_BEHIND_PENDING_DRAW);
+        public void postPresent() {
+            calls.add(Call.POST_PRESENT);
         }
 
         @Override
@@ -58,9 +58,9 @@ public class FrameSchedulerTest {
     }
 
     @Test
-    public void textureViewFrameIsPresentedBehindThePendingDraw() {
+    public void textureViewFrameIsPresentedByAPostedMessage() {
         mScheduler.requestFrame(BackingViewKind.TEXTURE_VIEW);
-        assertEquals(Arrays.asList(Call.POST_BEHIND_PENDING_DRAW), mHost.takeCalls());
+        assertEquals(Arrays.asList(Call.POST_PRESENT), mHost.takeCalls());
 
         mScheduler.onPosted();
         assertEquals(Arrays.asList(Call.PRESENT_ON_REQUEST), mHost.takeCalls());
@@ -69,24 +69,24 @@ public class FrameSchedulerTest {
     @Test
     public void textureViewIsNeverPresentedInsideAChoreographerFrame() {
         mScheduler.onFrame(BackingViewKind.TEXTURE_VIEW);
-        assertEquals(Arrays.asList(Call.POST_BEHIND_PENDING_DRAW), mHost.takeCalls());
+        assertEquals(Arrays.asList(Call.POST_PRESENT), mHost.takeCalls());
 
         mScheduler.onPosted();
         assertEquals(Arrays.asList(Call.PRESENT_ON_VSYNC), mHost.takeCalls());
     }
 
     @Test
-    public void textureViewLeftoverIsPresentedBehindTheDrawOfTheNextVsync() {
+    public void textureViewLeftoverIsPresentedByTheMessageOfTheNextVsync() {
         mHost.nextFrames.add(FrameScheduler.NextFrame.WAITING);
         mScheduler.requestFrame(BackingViewKind.TEXTURE_VIEW);
         mScheduler.onPosted();
         assertEquals(
-                Arrays.asList(Call.POST_BEHIND_PENDING_DRAW, Call.PRESENT_ON_REQUEST, Call.POST_FRAME_CALLBACK),
+                Arrays.asList(Call.POST_PRESENT, Call.PRESENT_ON_REQUEST, Call.POST_FRAME_CALLBACK),
                 mHost.takeCalls());
 
         mScheduler.onFrame(BackingViewKind.TEXTURE_VIEW);
         mScheduler.onPosted();
-        assertEquals(Arrays.asList(Call.POST_BEHIND_PENDING_DRAW, Call.PRESENT_ON_VSYNC), mHost.takeCalls());
+        assertEquals(Arrays.asList(Call.POST_PRESENT, Call.PRESENT_ON_VSYNC), mHost.takeCalls());
     }
 
     @Test
@@ -95,7 +95,7 @@ public class FrameSchedulerTest {
         mScheduler.requestFrame(BackingViewKind.TEXTURE_VIEW);
         mScheduler.onPosted();
         assertEquals(
-                Arrays.asList(Call.POST_BEHIND_PENDING_DRAW, Call.PRESENT_ON_REQUEST, Call.POST_FRAME_CALLBACK),
+                Arrays.asList(Call.POST_PRESENT, Call.PRESENT_ON_REQUEST, Call.POST_FRAME_CALLBACK),
                 mHost.takeCalls());
 
         mScheduler.requestFrame(BackingViewKind.TEXTURE_VIEW);
@@ -103,29 +103,29 @@ public class FrameSchedulerTest {
 
         mScheduler.onFrame(BackingViewKind.TEXTURE_VIEW);
         mScheduler.onPosted();
-        assertEquals(Arrays.asList(Call.POST_BEHIND_PENDING_DRAW, Call.PRESENT_ON_VSYNC), mHost.takeCalls());
+        assertEquals(Arrays.asList(Call.POST_PRESENT, Call.PRESENT_ON_VSYNC), mHost.takeCalls());
     }
 
     @Test
-    public void textureViewRequestWhileAFrameIsComingIsPresentedBehindThePendingDraw() {
+    public void textureViewRequestWhileAFrameIsComingIsPresentedByAPostedMessage() {
         mHost.nextFrames.add(FrameScheduler.NextFrame.COMING);
         mScheduler.requestFrame(BackingViewKind.TEXTURE_VIEW);
         mScheduler.onPosted();
         assertEquals(
-                Arrays.asList(Call.POST_BEHIND_PENDING_DRAW, Call.PRESENT_ON_REQUEST, Call.POST_FRAME_CALLBACK),
+                Arrays.asList(Call.POST_PRESENT, Call.PRESENT_ON_REQUEST, Call.POST_FRAME_CALLBACK),
                 mHost.takeCalls());
 
         mScheduler.requestFrame(BackingViewKind.TEXTURE_VIEW);
         mScheduler.onPosted();
-        assertEquals(Arrays.asList(Call.POST_BEHIND_PENDING_DRAW, Call.PRESENT_ON_REQUEST), mHost.takeCalls());
+        assertEquals(Arrays.asList(Call.POST_PRESENT, Call.PRESENT_ON_REQUEST), mHost.takeCalls());
 
         mScheduler.onFrame(BackingViewKind.TEXTURE_VIEW);
         mScheduler.onPosted();
-        assertEquals(Arrays.asList(Call.POST_BEHIND_PENDING_DRAW, Call.PRESENT_ON_VSYNC), mHost.takeCalls());
+        assertEquals(Arrays.asList(Call.POST_PRESENT, Call.PRESENT_ON_VSYNC), mHost.takeCalls());
     }
 
     @Test
-    public void textureViewRequestAndVsyncWaitingForTheSameDrawPresentOnceForTheVsync() {
+    public void textureViewRequestAndVsyncWaitingForTheSameMessagePresentOnceForTheVsync() {
         mHost.nextFrames.add(FrameScheduler.NextFrame.COMING);
         mScheduler.requestFrame(BackingViewKind.TEXTURE_VIEW);
         mScheduler.onPosted();
@@ -134,7 +134,7 @@ public class FrameSchedulerTest {
         mScheduler.requestFrame(BackingViewKind.TEXTURE_VIEW);
         mScheduler.onFrame(BackingViewKind.TEXTURE_VIEW);
         mScheduler.onPosted();
-        assertEquals(Arrays.asList(Call.POST_BEHIND_PENDING_DRAW, Call.PRESENT_ON_VSYNC), mHost.takeCalls());
+        assertEquals(Arrays.asList(Call.POST_PRESENT, Call.PRESENT_ON_VSYNC), mHost.takeCalls());
     }
 
     @Test
@@ -142,7 +142,7 @@ public class FrameSchedulerTest {
         mScheduler.onFrame(BackingViewKind.TEXTURE_VIEW);
         mScheduler.requestFrame(BackingViewKind.TEXTURE_VIEW);
         mScheduler.onPosted();
-        assertEquals(Arrays.asList(Call.POST_BEHIND_PENDING_DRAW, Call.PRESENT_ON_VSYNC), mHost.takeCalls());
+        assertEquals(Arrays.asList(Call.POST_PRESENT, Call.PRESENT_ON_VSYNC), mHost.takeCalls());
     }
 
     @Test
@@ -154,7 +154,7 @@ public class FrameSchedulerTest {
         mHost.takeCalls();
 
         mScheduler.requestFrame(BackingViewKind.TEXTURE_VIEW);
-        assertEquals(Arrays.asList(Call.POST_BEHIND_PENDING_DRAW), mHost.takeCalls());
+        assertEquals(Arrays.asList(Call.POST_PRESENT), mHost.takeCalls());
     }
 
     @Test
@@ -197,7 +197,7 @@ public class FrameSchedulerTest {
         mScheduler.requestFrame(BackingViewKind.TEXTURE_VIEW);
         mScheduler.requestFrame(BackingViewKind.TEXTURE_VIEW);
         assertEquals(
-                Arrays.asList(Call.POST_FRAME_CALLBACK, Call.PRESENT_ON_VSYNC, Call.POST_BEHIND_PENDING_DRAW),
+                Arrays.asList(Call.POST_FRAME_CALLBACK, Call.PRESENT_ON_VSYNC, Call.POST_PRESENT),
                 mHost.takeCalls());
     }
 
@@ -216,9 +216,9 @@ public class FrameSchedulerTest {
                         Call.PRESENT_ON_VSYNC,
                         Call.POST_FRAME_CALLBACK,
                         Call.PRESENT_ON_VSYNC,
-                        Call.POST_BEHIND_PENDING_DRAW,
+                        Call.POST_PRESENT,
                         Call.PRESENT_ON_REQUEST,
-                        Call.POST_BEHIND_PENDING_DRAW),
+                        Call.POST_PRESENT),
                 mHost.takeCalls());
     }
 
@@ -241,8 +241,8 @@ public class FrameSchedulerTest {
                 Arrays.asList(
                         Call.POST_FRAME_CALLBACK,
                         Call.POST_FRAME_CALLBACK,
-                        Call.POST_BEHIND_PENDING_DRAW,
-                        Call.POST_BEHIND_PENDING_DRAW),
+                        Call.POST_PRESENT,
+                        Call.POST_PRESENT),
                 mHost.takeCalls());
     }
 
