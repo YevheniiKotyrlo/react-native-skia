@@ -230,9 +230,7 @@ private:
       releaseWindow(nullptr, ownedSurface);
       return;
     }
-    const bool latchesOnWindowDraw =
-        !isSurface && android_get_device_api_level() >= __ANDROID_API_R__;
-    _latchesOnWindowDraw->store(latchesOnWindowDraw);
+    _latchesOnWindowDraw->store(!isSurface);
     _framePendingLatch->store(false);
     _surface->attach(window, width, height, highBitDepth,
                      /* useP3ColorSpace= */ false,
