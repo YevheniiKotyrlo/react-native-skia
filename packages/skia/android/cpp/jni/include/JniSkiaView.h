@@ -150,7 +150,7 @@ private:
     // GPU has finished the frame presented before it (libgui's queueBuffer,
     // for every Vulkan swapchain): a frame replayed that early is held.
     _surface = std::make_shared<RNSkWindowSurface>(
-        PresentHold::kUntilPreviousFrameDone);
+        PresentHold::kNone);
     // The Java view's frame callback and its refresh-rate vote. Weak: the
     // Java view owns this object through its hybrid data.
     jni::weak_ref<jhybridobject> weakJava = jni::make_weak(jThis);
