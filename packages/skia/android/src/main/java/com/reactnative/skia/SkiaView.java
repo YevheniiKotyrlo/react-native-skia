@@ -62,6 +62,13 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
     private final SurfaceFrameRateVote mFrameRateVote = new SurfaceFrameRateVote(this);
     private volatile boolean mVotesOnPresents = false;
 
+    private int mDiagScheduleFrames = 0;
+    private int mDiagPosted = 0;
+    private int mDiagDoFrames = 0;
+    private int mDiagLatchRuns = 0;
+    private volatile int mDiagLatchPosts = 0;
+    private final int[] mDiagResults = new int[3];
+
     // Present thread.
     private final Runnable mPostedPresent = this::onPostedPresent;
     private final FrameScheduler mFrameScheduler = new FrameScheduler(new FrameScheduler.Host() {
@@ -77,9 +84,11 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
 
         @Override
         public FrameScheduler.NextFrame presentFrame(boolean onVsync) {
-            return hasNativeView()
+            FrameScheduler.NextFrame next = hasNativeView()
                     ? FrameScheduler.NextFrame.fromNative(SkiaView.this.presentFrame(onVsync))
                     : FrameScheduler.NextFrame.NONE;
+            mDiagResults[next.ordinal()]++;
+            return next;
         }
     });
 
@@ -95,6 +104,7 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
         setClipChildren(true);
         RNSkiaModule skiaModule = ((ReactContext) context).getNativeModule(RNSkiaModule.class);
         mHybridData = initHybrid(skiaModule.getSkiaManager());
+        PresentThread.registerDiag(this);
     }
 
     @Override
@@ -255,6 +265,7 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
         PresentThread.post(() -> {
             stopFrames();
             mHybridData.resetNative();
+            PresentThread.unregisterDiag(this);
         });
     }
 
@@ -284,6 +295,7 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
     /** A recording was submitted. Present thread; called from native. */
     @DoNotStrip
     public void scheduleFrame() {
+        mDiagScheduleFrames++;
         mFrameScheduler.requestFrame(mKind);
     }
 
@@ -304,11 +316,24 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
     /** The present thread's Choreographer frame (see FrameScheduler.Host.postFrameCallback). */
     @Override
     public void doFrame(long frameTimeNanos) {
+        mDiagDoFrames++;
         mFrameScheduler.onFrame(mKind);
     }
 
     private void onPostedPresent() {
+        mDiagPosted++;
         mFrameScheduler.onPosted();
+    }
+
+    String describeDiag() {
+        String nativeState = hasNativeView() ? diagState() : "no native view";
+        return "view@" + Integer.toHexString(System.identityHashCode(this)) + " kind=" + mKind
+                + " dropped=" + mDropped + " windowAttached=" + isAttachedToWindow()
+                + " scheduleFrame=" + mDiagScheduleFrames + " posted=" + mDiagPosted
+                + " doFrame=" + mDiagDoFrames + " latchPosts=" + mDiagLatchPosts
+                + " latchRuns=" + mDiagLatchRuns + " results(none/waiting/coming)=" + mDiagResults[0]
+                + "/" + mDiagResults[1] + "/" + mDiagResults[2] + " scheduler{"
+                + mFrameScheduler.describeState() + "} native{" + nativeState + "}";
     }
 
     // Present thread: the view asks for no more frames.
@@ -387,7 +412,9 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
 
     @Override
     public void onSurfaceTextureUpdated() {
+        mDiagLatchPosts++;
         PresentThread.post(() -> {
+            mDiagLatchRuns++;
             if (hasNativeView()) {
                 frameLatched();
             }
@@ -437,4 +464,6 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
     private native int presentFrame(boolean onVsync);
 
     private native void frameLatched();
+
+    private native String diagState();
 }

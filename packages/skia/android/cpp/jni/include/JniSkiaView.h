@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <cstdio>
 #include <memory>
 
 #include <android/native_window.h>
@@ -47,7 +48,8 @@ public:
          makeNativeMethod("registerView", JniSkiaView::registerView),
          makeNativeMethod("unregisterView", JniSkiaView::unregisterView),
          makeNativeMethod("presentFrame", JniSkiaView::presentFrame),
-         makeNativeMethod("frameLatched", JniSkiaView::frameLatched)});
+         makeNativeMethod("frameLatched", JniSkiaView::frameLatched),
+         makeNativeMethod("diagState", JniSkiaView::diagState)});
   }
 
   // The manager is owned by the RNSkiaModule and is destroyed when the module
@@ -127,7 +129,29 @@ protected:
   // Presents what is waiting (see RNSkView::presentFrame); returns the value
   // of RNSkView::NextFrame, which FrameScheduler.NextFrame reads.
   int presentFrame(bool onVsync) {
-    return static_cast<int>(_view->presentFrame(onVsync));
+    _diagPresentFrameCalls++;
+    if (!_surface->canPresent()) {
+      _diagPresentFrameGated++;
+    }
+    const int next = static_cast<int>(_view->presentFrame(onVsync));
+    _diagLastNext = next;
+    return next;
+  }
+
+  jni::local_ref<jni::JString> diagState() {
+    char text[640];
+    std::snprintf(
+        text, sizeof(text),
+        "pending=%d latching=%d attached=%d canPresent=%d presents=%lld "
+        "latches=%lld latchesWithoutPending=%lld presentFrame=%lld "
+        "gated=%lld lastNext=%d %s",
+        _framePendingLatch->load() ? 1 : 0,
+        _latchesOnWindowDraw->load() ? 1 : 0, _surface->isAttached() ? 1 : 0,
+        _surface->canPresent() ? 1 : 0, _diagPresents->load(),
+        _diagLatches.load(), _diagLatchesWithoutPending.load(),
+        _diagPresentFrameCalls.load(), _diagPresentFrameGated.load(),
+        _diagLastNext.load(), _view->describeDiagState().c_str());
+    return jni::make_jstring(text);
   }
 
   /**
@@ -136,8 +160,11 @@ protected:
    its queue: what waited for it goes now. Present thread.
    */
   void frameLatched() {
+    _diagLatches++;
     if (_framePendingLatch->exchange(false)) {
       _view->onCanPresent();
+    } else {
+      _diagLatchesWithoutPending++;
     }
   }
 
@@ -168,7 +195,8 @@ private:
     // view was asked to present: it asks on every frame while one is coming.
     _surface->setDidPresent([latchesOnWindowDraw = _latchesOnWindowDraw,
                              framePendingLatch = _framePendingLatch,
-                             weakJava]() {
+                             diagPresents = _diagPresents, weakJava]() {
+      (*diagPresents)++;
       if (latchesOnWindowDraw->load()) {
         framePendingLatch->store(true);
       }
@@ -271,6 +299,13 @@ private:
       std::make_shared<std::atomic<bool>>(false);
   std::shared_ptr<std::atomic<bool>> _framePendingLatch =
       std::make_shared<std::atomic<bool>>(false);
+  std::shared_ptr<std::atomic<long long>> _diagPresents =
+      std::make_shared<std::atomic<long long>>(0);
+  std::atomic<long long> _diagLatches = {0};
+  std::atomic<long long> _diagLatchesWithoutPending = {0};
+  std::atomic<long long> _diagPresentFrameCalls = {0};
+  std::atomic<long long> _diagPresentFrameGated = {0};
+  std::atomic<int> _diagLastNext = {-1};
   // Declared before the view, which unbinds itself from the surface when it
   // is destroyed.
   std::shared_ptr<RNSkWindowSurface> _surface;
