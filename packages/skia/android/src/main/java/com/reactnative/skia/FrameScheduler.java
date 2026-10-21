@@ -7,9 +7,10 @@ import androidx.annotation.Nullable;
  * on the next vsync, a TextureView behind the draw its window has pending, so
  * that the window has taken the previous frame by then. While a replay is in
  * flight it asks for every vsync, whose present paces the replays. A vsync's
- * present that the main thread reaches only once the next vsync has come goes
- * behind that frame's draw, once, so that the window's frame never waits for
- * it. Keeps at most one frame callback and one posted present outstanding.
+ * present that would still hold the main thread when the next vsync comes,
+ * taking as long as the view's last present, goes behind that frame's draw,
+ * once, so that the window's frame never waits for it. Keeps at most one frame
+ * callback and one posted present outstanding.
  * Main thread.
  */
 final class FrameScheduler {
@@ -77,6 +78,8 @@ final class FrameScheduler {
     private boolean mHasFrameTime = false;
     private long mLastFrameTimeNanos = 0;
     private long mFrameIntervalNanos = UNKNOWN_FRAME_INTERVAL_NANOS;
+    // How long the view's last present held the main thread.
+    private long mLastPresentNanos = 0;
 
     FrameScheduler(Host host) {
         mHost = host;
@@ -122,9 +125,9 @@ final class FrameScheduler {
     void onPosted() {
         PostedPresent posted = mPostedPresent;
         mPostedPresent = PostedPresent.NONE;
-        if (posted == PostedPresent.POSTED && mTicking && isNextVsyncDue()) {
-            // The window's next frame waits behind this message: the present
-            // goes behind that frame's draw, which asks for a present too.
+        if (posted == PostedPresent.POSTED && mTicking && wouldOutlastFrame()) {
+            // The window's next frame would wait behind this present: it goes
+            // behind that frame's draw, which asks for a present too.
             postFrameCallback();
             post(PostedPresent.DEFERRED);
             return;
@@ -153,16 +156,20 @@ final class FrameScheduler {
         };
     }
 
-    // The vsync after the view's last frame has come.
-    private boolean isNextVsyncDue() {
-        return mHost.nowNanos() - mLastFrameTimeNanos >= mFrameIntervalNanos;
+    // A present started now and taking as long as the view's last one would
+    // still run when the vsync after the view's last frame comes.
+    private boolean wouldOutlastFrame() {
+        return mHost.nowNanos() + mLastPresentNanos - mLastFrameTimeNanos >= mFrameIntervalNanos;
     }
 
     // A frame still waiting (the present failed, or more were submitted
     // meanwhile) is tried again on the next vsync, never straight away; a frame
     // coming keeps the vsync asked for.
     private void present(int vsyncs) {
-        switch (mHost.presentFrame(vsyncs)) {
+        long startNanos = mHost.nowNanos();
+        NextFrame next = mHost.presentFrame(vsyncs);
+        mLastPresentNanos = mHost.nowNanos() - startNanos;
+        switch (next) {
             case NONE -> {
                 mRetryPosted = false;
                 mTicking = false;

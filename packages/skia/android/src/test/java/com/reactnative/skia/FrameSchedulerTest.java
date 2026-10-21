@@ -25,6 +25,8 @@ public class FrameSchedulerTest {
         final List<Call> calls = new ArrayList<>();
         final Deque<FrameScheduler.NextFrame> nextFrames = new ArrayDeque<>();
         long nowNanos = 0;
+        // How long each present holds the main thread.
+        long presentNanos = 0;
 
         @Override
         public void postFrameCallback() {
@@ -44,6 +46,7 @@ public class FrameSchedulerTest {
                 case 2 -> Call.PRESENT_ON_TWO_VSYNCS;
                 default -> throw new AssertionError("presented for " + vsyncs + " vsyncs");
             });
+            nowNanos += presentNanos;
             return nextFrames.isEmpty() ? FrameScheduler.NextFrame.NONE : nextFrames.removeFirst();
         }
 
@@ -446,6 +449,51 @@ public class FrameSchedulerTest {
                 Arrays.asList(Call.POST_BEHIND_PENDING_DRAW, Call.PRESENT_ON_REQUEST, Call.POST_FRAME_CALLBACK,
                         Call.POST_BEHIND_PENDING_DRAW, Call.PRESENT_ON_VSYNC),
                 mHost.takeCalls());
+    }
+
+    // Two frames a vsync apart ask a TextureView for presents, each holding the
+    // main thread for presentNanos, the first presented and the second's posted.
+    private void tickTwiceWithPresentsOf(long presentNanos) {
+        mHost.presentNanos = presentNanos;
+        mHost.nextFrames.add(FrameScheduler.NextFrame.COMING);
+        frame(BackingViewKind.TEXTURE_VIEW);
+        mScheduler.onPosted();
+        mHost.nowNanos = FRAME_INTERVAL_NANOS;
+        frame(BackingViewKind.TEXTURE_VIEW);
+        mHost.takeCalls();
+    }
+
+    @Test
+    public void textureViewVsyncPresentThatWouldOutlastTheFrameGoesBehindTheNextFramesDraw() {
+        long presentNanos = 2_000_000;
+        tickTwiceWithPresentsOf(presentNanos);
+        mHost.nowNanos = 2 * FRAME_INTERVAL_NANOS - presentNanos;
+        mScheduler.onPosted();
+        assertEquals(Arrays.asList(Call.POST_FRAME_CALLBACK, Call.POST_BEHIND_PENDING_DRAW), mHost.takeCalls());
+    }
+
+    @Test
+    public void textureViewVsyncPresentThatEndsBeforeTheNextVsyncIsPresentedAtOnce() {
+        long presentNanos = 2_000_000;
+        tickTwiceWithPresentsOf(presentNanos);
+        mHost.nowNanos = 2 * FRAME_INTERVAL_NANOS - presentNanos - 1;
+        mScheduler.onPosted();
+        assertEquals(Arrays.asList(Call.PRESENT_ON_VSYNC), mHost.takeCalls());
+    }
+
+    @Test
+    public void aPresentIsJudgedByHowLongTheViewsLastPresentTook() {
+        tickTwiceWithPresentsOf(2_000_000);
+        mHost.presentNanos = 0;
+        mHost.nextFrames.add(FrameScheduler.NextFrame.COMING);
+        mHost.nowNanos = FRAME_INTERVAL_NANOS + 1;
+        mScheduler.onPosted();
+        mHost.nowNanos = 2 * FRAME_INTERVAL_NANOS;
+        frame(BackingViewKind.TEXTURE_VIEW);
+        mHost.nowNanos = 3 * FRAME_INTERVAL_NANOS - 1;
+        mScheduler.onPosted();
+        assertEquals(Arrays.asList(Call.PRESENT_ON_VSYNC, Call.POST_FRAME_CALLBACK, Call.POST_BEHIND_PENDING_DRAW,
+                Call.PRESENT_ON_VSYNC), mHost.takeCalls());
     }
 
     @Test
