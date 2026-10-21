@@ -9,6 +9,16 @@
 #include "dawn/native/MetalBackend.h"
 #endif
 
+#ifdef __ANDROID__
+#include <android/trace.h>
+#include <pthread.h>
+
+#include <chrono>
+#include <deque>
+#include <string>
+#include <thread>
+#endif
+
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdocumentation"
 
@@ -21,6 +31,61 @@
 #pragma clang diagnostic pop
 
 namespace RNSkia {
+
+#ifdef __ANDROID__
+namespace {
+
+void traceMark(const std::string &name) {
+  ATrace_beginSection(name.c_str());
+  ATrace_endSection();
+}
+
+class GpuDoneWatcher {
+public:
+  void watch(const wgpu::Future &work) {
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      _pending.push_back(work);
+    }
+    std::call_once(_started, [this]() { std::thread([this]() { run(); }).detach(); });
+  }
+
+private:
+  void run() {
+    pthread_setname_np(pthread_self(), "RNSkia HoldProbe");
+    for (;;) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      for (;;) {
+        wgpu::Future oldest;
+        {
+          std::lock_guard<std::mutex> lock(_mutex);
+          if (_pending.empty()) {
+            break;
+          }
+          oldest = _pending.front();
+        }
+        if (!DawnContext::getInstance().isWorkDone(oldest)) {
+          break;
+        }
+        traceMark("rnskia gpu-done #" + std::to_string(oldest.id));
+        std::lock_guard<std::mutex> lock(_mutex);
+        _pending.pop_front();
+      }
+    }
+  }
+
+  std::mutex _mutex;
+  std::deque<wgpu::Future> _pending;
+  std::once_flag _started;
+};
+
+GpuDoneWatcher &gpuDoneWatcher() {
+  static auto *watcher = new GpuDoneWatcher();
+  return *watcher;
+}
+
+} // namespace
+#endif
 
 RNSkWindowSurface::~RNSkWindowSurface() { detach(); }
 
@@ -249,7 +314,13 @@ bool RNSkWindowSurface::presentRecordings(
   }
   // A recording Graphite rejects is logged there and dropped: it would be
   // rejected again on every frame, and the frames behind it would never come.
+#ifdef __ANDROID__
+  ATrace_beginSection("rnskia replay");
+#endif
   DawnContext::getInstance().insertRecordings(recordings, surface.get());
+#ifdef __ANDROID__
+  ATrace_endSection();
+#endif
 #ifdef __APPLE__
   dawn::native::metal::WaitForCommandsToBeScheduled(_device.Get());
 #endif
@@ -298,11 +369,21 @@ void RNSkWindowSurface::presentNow() {
 }
 
 RNSkWindowSurface::DawnQueue::Work RNSkWindowSurface::DawnQueue::track() {
-  return DawnContext::getInstance().trackSubmittedWork();
+  auto work = DawnContext::getInstance().trackSubmittedWork();
+#ifdef __ANDROID__
+  traceMark("rnskia track #" + std::to_string(work.id));
+  gpuDoneWatcher().watch(work);
+#endif
+  return work;
 }
 
 bool RNSkWindowSurface::DawnQueue::isDone(const Work &work) {
-  return DawnContext::getInstance().isWorkDone(work);
+  bool done = DawnContext::getInstance().isWorkDone(work);
+#ifdef __ANDROID__
+  traceMark(std::string(done ? "rnskia isDone=1 #" : "rnskia isDone=0 #") +
+            std::to_string(work.id));
+#endif
+  return done;
 }
 
 } // namespace RNSkia
