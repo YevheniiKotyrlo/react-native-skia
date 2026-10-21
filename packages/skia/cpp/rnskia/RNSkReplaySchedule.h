@@ -144,12 +144,12 @@ private:
   void keptUp() {
     _replaysKeptUp++;
     if (_replaysKeptUp >= _replaysToKeepUp) {
-      _pacing = ReplayPacing::kAfterPresent;
+      _pacing = ReplayPacing::kPipelined;
     }
   }
 
   const size_t _replaysToKeepUp;
-  ReplayPacing _pacing = ReplayPacing::kAfterPresent;
+  ReplayPacing _pacing = ReplayPacing::kPipelined;
   bool _jobInFlight = false;
   // Whether the job in flight started at a present, and how many present
   // ticks it has seen.
