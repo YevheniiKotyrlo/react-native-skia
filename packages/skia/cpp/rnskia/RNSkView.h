@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <cstdio>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -310,6 +311,19 @@ public:
 
   std::shared_ptr<RNSkPlatformContext> getPlatformContext() {
     return _platformContext;
+  }
+
+  std::string describeDiagState() {
+    auto target = getTarget();
+    char text[200];
+    std::snprintf(text, sizeof(text),
+                  "target=%d queued=%d held=%d replaying=%d redrawRequested=%d",
+                  target != nullptr ? 1 : 0,
+                  target != nullptr && target->hasQueued() ? 1 : 0,
+                  _surface->hasHeldFrame() ? 1 : 0,
+                  _producer->isReplaying() ? 1 : 0,
+                  _redrawRequested.load() ? 1 : 0);
+    return text;
   }
 
 private:

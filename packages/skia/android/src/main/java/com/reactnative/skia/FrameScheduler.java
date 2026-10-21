@@ -97,6 +97,11 @@ final class FrameScheduler {
         present(onVsync);
     }
 
+    String describeState() {
+        return "frameCallbackPosted=" + mFrameCallbackPosted + " retryPosted=" + mRetryPosted
+                + " presentPosted=" + mPresentPosted + " postedPresentOnVsync=" + mPostedPresentOnVsync;
+    }
+
     /** The view left its window, and the host removed both callbacks. */
     void cancel() {
         mFrameCallbackPosted = false;
