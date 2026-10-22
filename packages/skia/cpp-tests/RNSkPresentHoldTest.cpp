@@ -104,11 +104,24 @@ public:
     _presentedSinceTick = 0;
   }
 
+  /**
+   The window goes away: its held frame is presented into it before the
+   swapchain goes, whatever the GPU and the tick, and the next window starts
+   afresh.
+   */
+  void detach() {
+    _presentHold.releaseFrames([this] { _released.push_back(_frame); });
+    _lastPresented = std::nullopt;
+    _presentedSinceTick = 0;
+  }
+
   bool hasHeldFrame() const { return _presentHold.hasHeldFrame(); }
   int tracked() const { return _gpu->tracked; }
   const std::vector<int> &replayed() const { return _replayed; }
   const std::vector<int> &presented() const { return _presented; }
   const std::vector<int> &dropped() const { return _dropped; }
+  /** The frames presented into a window as it went away. */
+  const std::vector<int> &released() const { return _released; }
   /**
    Whether a frame was ever presented while the GPU was still on the frame
    presented before it, on the same swapchain.
@@ -138,6 +151,7 @@ private:
   std::vector<int> _replayed;
   std::vector<int> _presented;
   std::vector<int> _dropped;
+  std::vector<int> _released;
 };
 
 enum class Event {
@@ -145,12 +159,13 @@ enum class Event {
   kPresentHeldFrame,
   kFinishGpuFrame,
   kReconfigure,
-  kTick
+  kTick,
+  kDetach
 };
 
-constexpr Event kEvents[] = {Event::kReplay, Event::kPresentHeldFrame,
+constexpr Event kEvents[] = {Event::kReplay,         Event::kPresentHeldFrame,
                              Event::kFinishGpuFrame, Event::kReconfigure,
-                             Event::kTick};
+                             Event::kTick,           Event::kDetach};
 
 /** Applies an event the window can take in its state. Returns whether it could.
  */
@@ -167,6 +182,9 @@ bool apply(Window &window, Event event) {
     return true;
   case Event::kTick:
     window.tick();
+    return true;
+  case Event::kDetach:
+    window.detach();
     return true;
   }
   return false;
@@ -200,7 +218,9 @@ void forEachSequence(PresentHold hold, size_t depth, const Check &check,
     sequence.push_back(event);
     if (auto window = windowAfter(hold, sequence)) {
       check(sequence, *window);
-      forEachSequence(hold, depth, check, sequence);
+      if (event != Event::kDetach) {
+        forEachSequence(hold, depth, check, sequence);
+      }
     }
     sequence.pop_back();
   }
@@ -208,7 +228,8 @@ void forEachSequence(PresentHold hold, size_t depth, const Check &check,
 
 /**
  Every sequence of events up to a depth a window with `hold` can take: `check`
- runs after each event.
+ runs after each event. A detach ends a sequence: the window that follows
+ starts as one after a reconfigure does, which the sequences already cover.
  */
 void forEachSequence(PresentHold hold, const Check &check) {
   std::vector<Event> sequence;
@@ -314,6 +335,53 @@ TEST_CASE(DropsTheHeldFrameWithItsSwapchain) {
   EXPECT(window.presented() == (std::vector<int>{1, 3}));
 }
 
+TEST_CASE(PresentsTheHeldFrameWhenItsWindowGoesAway) {
+  Window window(PresentHold::kOncePerTickAfterPreviousFrame);
+  REQUIRE(window.replay());
+  window.tick();
+  REQUIRE(window.replay());
+  REQUIRE(window.hasHeldFrame());
+  window.detach();
+  EXPECT(!window.hasHeldFrame());
+  EXPECT(window.released() == (std::vector<int>{2}));
+  EXPECT(window.dropped().empty());
+  REQUIRE(window.replay());
+  EXPECT(window.presented() == (std::vector<int>{1, 3}));
+}
+
+TEST_CASE(PresentsNothingWhenAWindowHoldingNoFrameGoesAway) {
+  for (PresentHold hold : kHolds) {
+    Window window(hold);
+    window.detach();
+    REQUIRE(window.replay());
+    window.detach();
+    EXPECT(window.released().empty());
+    EXPECT(window.presented() == (std::vector<int>{1}));
+  }
+}
+
+TEST_CASE(LeavesNoFrameHeldWhenItsWindowGoesAwayInEverySequence) {
+  for (PresentHold hold : kHolds) {
+    size_t released = 0;
+    forEachSequence(hold, [hold, &released](const std::vector<Event> &sequence,
+                                            const Window &window) {
+      if (sequence.back() != Event::kDetach) {
+        return;
+      }
+      EXPECT(!window.hasHeldFrame());
+      std::vector<Event> beforeDetach(sequence.begin(), sequence.end() - 1);
+      const bool held = windowAfter(hold, beforeDetach)->hasHeldFrame();
+      const std::vector<int> heldFrame =
+          held ? std::vector<int>{window.replayed().back()}
+               : std::vector<int>{};
+      EXPECT(window.released() == heldFrame);
+      released += window.released().size();
+    });
+    EXPECT((released > 0) ==
+           (hold == PresentHold::kOncePerTickAfterPreviousFrame));
+  }
+}
+
 TEST_CASE(NeverPresentsOverABusyGpuInEverySequence) {
   for (PresentHold hold : kHolds) {
     bool presentedOverBusyGpu = false;
@@ -336,6 +404,8 @@ TEST_CASE(PresentsOrDropsEveryFrameOnceInOrderInEverySequence) {
           std::vector<int> settled = presented;
           settled.insert(settled.end(), window.dropped().begin(),
                          window.dropped().end());
+          settled.insert(settled.end(), window.released().begin(),
+                         window.released().end());
           std::sort(settled.begin(), settled.end());
           std::vector<int> expected(window.replayed().size() -
                                     (window.hasHeldFrame() ? 1 : 0));
@@ -343,7 +413,8 @@ TEST_CASE(PresentsOrDropsEveryFrameOnceInOrderInEverySequence) {
           EXPECT(settled == expected);
           mostDropped = std::max(mostDropped, window.dropped().size());
         });
-    EXPECT((mostDropped > 0) == (hold == PresentHold::kOncePerTickAfterPreviousFrame));
+    EXPECT((mostDropped > 0) ==
+           (hold == PresentHold::kOncePerTickAfterPreviousFrame));
   }
 }
 
