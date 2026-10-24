@@ -51,6 +51,19 @@ struct JniSkiaPresentedImages : jni::JavaClass<JniSkiaPresentedImages> {
 
   /** Forgets the bitmap of `id`. */
   static void discard(uint32_t id);
+
+  /** Registers the store's native methods (see halve). */
+  static void registerNatives();
+
+  /**
+   SkiaPresentedImages.halve: writes the level below `bitmap` into `half`,
+   each pixel the mean of the two by two block it covers (see halvePixels),
+   across cores for a large one. Throws OutOfMemoryError when either bitmap's
+   pixels cannot be locked.
+   */
+  static void halve(jni::alias_ref<jclass>,
+                    jni::alias_ref<JBitmap::javaobject> bitmap,
+                    jni::alias_ref<JBitmap::javaobject> half);
 };
 
 } // namespace RNSkia

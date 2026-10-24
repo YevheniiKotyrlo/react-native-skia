@@ -1,9 +1,6 @@
 package com.reactnative.skia;
 
 import android.graphics.Bitmap;
-import android.graphics.Canvas;
-import android.graphics.Paint;
-import android.graphics.RectF;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
@@ -32,21 +29,14 @@ final class PresentedImage {
     });
 
     private static final ImageLevels.Halving<Bitmap> sBitmapHalving = new ImageLevels.Halving<Bitmap>() {
-        private final Paint mPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
-
-        // A box filter: each pixel of the half-size level is the mean of the two by two block it covers, which the
-        // bilinear sample at its center reads at exactly half the scale. An odd side's last row or column is left
-        // out: createScaledBitmap would scale it by (n / 2) / n, moving the samples off the blocks' corners onto
-        // pixel centers, which point-samples the middle of that side.
+        // A box filter, native and across cores: createScaledBitmap would scale an odd side by (n / 2) / n, moving
+        // the samples off the blocks' corners onto pixel centers, which point-samples the middle of that side.
         @NonNull
         @Override
         public Bitmap halve(@NonNull Bitmap bitmap) {
-            int width = bitmap.getWidth();
-            int height = bitmap.getHeight();
-            Bitmap half = Bitmap.createBitmap(Math.max(1, width / 2), Math.max(1, height / 2),
+            Bitmap half = Bitmap.createBitmap(Math.max(1, bitmap.getWidth() / 2), Math.max(1, bitmap.getHeight() / 2),
                     Bitmap.Config.ARGB_8888);
-            RectF destination = new RectF(0, 0, width > 1 ? width / 2f : 1, height > 1 ? height / 2f : 1);
-            new Canvas(half).drawBitmap(bitmap, null, destination, mPaint);
+            SkiaPresentedImages.halve(bitmap, half);
             return half;
         }
 

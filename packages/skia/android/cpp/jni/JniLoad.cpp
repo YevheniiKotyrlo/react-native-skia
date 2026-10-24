@@ -20,7 +20,7 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *) {
     facebook::jni::JNativeRunnable::newObjectCxxArgs([] {});
     // The image views' bitmaps are made and published on the worker, a
     // thread the JVM did not create either: their store's class, the same
-    // way.
-    RNSkia::JniSkiaPresentedImages::javaClassStatic();
+    // way, resolved as its native methods are registered.
+    RNSkia::JniSkiaPresentedImages::registerNatives();
   });
 }

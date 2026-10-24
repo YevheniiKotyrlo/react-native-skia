@@ -50,6 +50,13 @@ final class SkiaPresentedImages {
     }
 
     /**
+     * Writes the level below `bitmap` into `half`, floor(width / 2) by floor(height / 2) and at least one: each pixel
+     * the mean of the two by two block it covers, an odd side's last row or column left out. Throws
+     * OutOfMemoryError when either bitmap's pixels cannot be locked. Any thread.
+     */
+    static native void halve(@NonNull Bitmap bitmap, @NonNull Bitmap half);
+
+    /**
      * Runs on the main thread, after the publish and discard requests made before it. Any thread, the view's
      * attachment to a window notwithstanding.
      */
