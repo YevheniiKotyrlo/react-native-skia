@@ -168,7 +168,9 @@ public:
 
   /**
    Installed by the platform view: called after each frame the window
-   presents, on the thread that presented it.
+   presents, on the thread that presented it, with the window's mutex held,
+   so that detach() returns only once it has run. It must neither block nor
+   call back into this surface.
    */
   void setDidPresent(std::function<void()> didPresent) {
     _didPresent = std::move(didPresent);

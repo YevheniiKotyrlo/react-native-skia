@@ -57,14 +57,14 @@ public class FirstFrameDrawGateTest {
         mGate.onRedrawNeeded(draw("first"));
         assertEquals(Arrays.asList(), mReported);
 
-        mGate.onFirstFramePresented();
+        mGate.onFirstFramePresented(mGate.currentSurface());
         assertEquals(Arrays.asList("first"), mReported);
     }
 
     @Test
     public void drawRequestedAfterTheFirstFrameIsReportedAtOnce() {
         mGate.onSurfaceCreated();
-        mGate.onFirstFramePresented();
+        mGate.onFirstFramePresented(mGate.currentSurface());
         mGate.onRedrawNeeded(draw("resize"));
         assertEquals(Arrays.asList("resize"), mReported);
         assertEquals(0, mHost.posted.size());
@@ -73,14 +73,27 @@ public class FirstFrameDrawGateTest {
     @Test
     public void newSurfaceWaitsForItsOwnFirstFrame() {
         mGate.onSurfaceCreated();
-        mGate.onFirstFramePresented();
+        mGate.onFirstFramePresented(mGate.currentSurface());
         mGate.onSurfaceReleased();
         mGate.onSurfaceCreated();
         mGate.onRedrawNeeded(draw("second surface"));
         assertEquals(Arrays.asList(), mReported);
 
-        mGate.onFirstFramePresented();
+        mGate.onFirstFramePresented(mGate.currentSurface());
         assertEquals(Arrays.asList("second surface"), mReported);
+    }
+
+    @Test
+    public void aFirstFrameOfAReleasedSurfaceLeavesTheNextSurfaceWaiting() {
+        mGate.onSurfaceCreated();
+        int released = mGate.currentSurface();
+        mGate.onSurfaceReleased();
+        mGate.onSurfaceCreated();
+        mGate.onRedrawNeeded(draw("second surface"));
+
+        mGate.onFirstFramePresented(released);
+        assertEquals(Arrays.asList(), mReported);
+        assertFalse(mGate.hasFrame());
     }
 
     @Test
@@ -101,7 +114,7 @@ public class FirstFrameDrawGateTest {
         assertEquals(Arrays.asList("held"), mReported);
 
         mGate.onSurfaceReleased();
-        mGate.onFirstFramePresented();
+        mGate.onFirstFramePresented(mGate.currentSurface());
         mHost.elapse();
         assertEquals(Arrays.asList("held"), mReported);
     }
@@ -110,8 +123,8 @@ public class FirstFrameDrawGateTest {
     public void eachDrawIsReportedOnce() {
         mGate.onSurfaceCreated();
         mGate.onRedrawNeeded(draw("once"));
-        mGate.onFirstFramePresented();
-        mGate.onFirstFramePresented();
+        mGate.onFirstFramePresented(mGate.currentSurface());
+        mGate.onFirstFramePresented(mGate.currentSurface());
         mGate.onSurfaceReleased();
         mHost.elapse();
         assertEquals(Arrays.asList("once"), mReported);
@@ -142,7 +155,7 @@ public class FirstFrameDrawGateTest {
     public void theFirstFrameCancelsTheDeadline() {
         mGate.onSurfaceCreated();
         mGate.onRedrawNeeded(draw("framed"));
-        mGate.onFirstFramePresented();
+        mGate.onFirstFramePresented(mGate.currentSurface());
         assertEquals(0, mHost.posted.size());
         assertEquals(Arrays.asList("framed"), mReported);
     }
@@ -165,7 +178,7 @@ public class FirstFrameDrawGateTest {
         mHost.elapse();
         assertEquals(Arrays.asList(), mReported);
 
-        gate.onFirstFramePresented();
+        gate.onFirstFramePresented(gate.currentSurface());
         assertEquals(Arrays.asList("held"), mReported);
     }
 
@@ -178,7 +191,7 @@ public class FirstFrameDrawGateTest {
         assertEquals(Arrays.asList("first"), mReported);
         assertEquals(1, mHost.posted.size());
 
-        mGate.onFirstFramePresented();
+        mGate.onFirstFramePresented(mGate.currentSurface());
         assertEquals(Arrays.asList("first", "resize"), mReported);
     }
 
@@ -187,8 +200,8 @@ public class FirstFrameDrawGateTest {
         mGate.onSurfaceCreated();
         assertFalse(mGate.hasFrame());
 
-        mGate.onFirstFramePresented();
-        mGate.onFirstFramePresented();
+        mGate.onFirstFramePresented(mGate.currentSurface());
+        mGate.onFirstFramePresented(mGate.currentSurface());
         assertTrue(mGate.hasFrame());
         assertEquals(1, mHost.invalidations);
     }
@@ -202,7 +215,7 @@ public class FirstFrameDrawGateTest {
         assertFalse(mGate.hasFrame());
         assertEquals(0, mHost.invalidations);
 
-        mGate.onFirstFramePresented();
+        mGate.onFirstFramePresented(mGate.currentSurface());
         assertTrue(mGate.hasFrame());
         assertEquals(1, mHost.invalidations);
     }
@@ -210,14 +223,14 @@ public class FirstFrameDrawGateTest {
     @Test
     public void aNewSurfaceKeepsTheHoleClosedUntilItsOwnFirstFrame() {
         mGate.onSurfaceCreated();
-        mGate.onFirstFramePresented();
+        mGate.onFirstFramePresented(mGate.currentSurface());
         mGate.onSurfaceReleased();
         assertFalse(mGate.hasFrame());
 
         mGate.onSurfaceCreated();
         assertFalse(mGate.hasFrame());
 
-        mGate.onFirstFramePresented();
+        mGate.onFirstFramePresented(mGate.currentSurface());
         assertTrue(mGate.hasFrame());
         assertEquals(3, mHost.invalidations);
     }

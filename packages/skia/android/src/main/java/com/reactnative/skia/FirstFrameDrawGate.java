@@ -16,7 +16,9 @@ import java.util.ArrayList;
  * hasFrame(). A SurfaceView counts its draw as reported once, for its later
  * surfaces too, so the view keeps their holes closed the same way. Leaving
  * the window reports what is held, because Android 13 settles a SurfaceView's
- * pending draw only through that report. Main thread.
+ * pending draw only through that report. A first frame is reported for the
+ * surface it went into, and one reported for a surface released since opens
+ * nothing. Main thread, but for currentSurface().
  */
 final class FirstFrameDrawGate {
     /**
@@ -46,6 +48,9 @@ final class FirstFrameDrawGate {
     private final Runnable mFirstFrameDeadline = this::onFirstFrameDeadline;
     private boolean mFramePresented = false;
     private boolean mDeadlinePosted = false;
+    // The surfaces released so far: written on the main thread, read on the
+    // thread that presents (see currentSurface).
+    private volatile int mSurfacesReleased = 0;
     private final ArrayList<Runnable> mPendingDrawsFinished = new ArrayList<>();
 
     FirstFrameDrawGate(Host host, int sdkInt) {
@@ -76,15 +81,33 @@ final class FirstFrameDrawGate {
         }
     }
 
-    /** A frame was presented into the surface. */
-    void onFirstFramePresented() {
+    /**
+     * The surface a frame presented now goes into, to hand to
+     * onFirstFramePresented. The thread that presented reads it while the
+     * native side holds the window, and onSurfaceReleased() counts a surface
+     * only once the native side has let go of it, so a frame never names a
+     * surface created after the one it went into. Any thread.
+     */
+    int currentSurface() {
+        return mSurfacesReleased;
+    }
+
+    /** A first frame was presented into the surface currentSurface() named. */
+    void onFirstFramePresented(int surface) {
+        if (surface != mSurfacesReleased) {
+            return;
+        }
         setFramePresented(true);
         cancelDeadline();
         reportPendingDraws();
     }
 
-    /** The surface is gone, so it has nothing left to draw. */
+    /**
+     * The surface is gone, so it has nothing left to draw. Called once the
+     * native side has let go of it (see currentSurface).
+     */
     void onSurfaceReleased() {
+        mSurfacesReleased++;
         setFramePresented(false);
         cancelDeadline();
         reportPendingDraws();

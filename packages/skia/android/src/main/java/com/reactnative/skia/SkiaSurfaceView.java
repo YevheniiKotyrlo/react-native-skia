@@ -113,13 +113,20 @@ public class SkiaSurfaceView extends SurfaceView implements SurfaceHolder.Callba
         releaseSurface();
     }
 
-    /** A frame was presented into the surface. Main thread. */
-    void onFirstFramePresented() {
-        mDrawGate.onFirstFramePresented();
+    /** See FirstFrameDrawGate.currentSurface. Any thread. */
+    int currentSurface() {
+        return mDrawGate.currentSurface();
     }
 
+    /** A first frame was presented into the surface currentSurface() named. Main thread. */
+    void onFirstFramePresented(int surface) {
+        mDrawGate.onFirstFramePresented(surface);
+    }
+
+    // The native side lets go of the surface, waiting for a present in flight,
+    // before the gate counts it released (see FirstFrameDrawGate.currentSurface).
     private void releaseSurface() {
-        mDrawGate.onSurfaceReleased();
         mApi.onSurfaceDestroyed();
+        mDrawGate.onSurfaceReleased();
     }
 }

@@ -85,10 +85,7 @@ protected:
   // Main thread, before the platform destroys the window: waits for the
   // present in flight, if any, then lets go of the window (see
   // RNSkWindowSurface::detach).
-  void surfaceDestroyed() {
-    _awaitingFirstFrame->store(false);
-    _surface->detach();
-  }
+  void surfaceDestroyed() { _surface->detach(); }
 
   /**
    The pixel size the backing view was laid out with. The surface it gets

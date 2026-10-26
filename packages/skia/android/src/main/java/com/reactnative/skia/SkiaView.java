@@ -57,14 +57,12 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
     // The backing view, created by the first prop transaction and kept, with
     // the kind and the buffer format it was created with. The kind is null
     // until then: it is what tells a mounted canvas apart. Written on the
-    // main thread, read on the present thread (see doFrame).
-    private View mView;
+    // main thread, read on the present thread (see doFrame and
+    // onFirstFramePresented).
+    private volatile View mView;
     @Nullable
     private volatile BackingViewKind mKind = null;
     private boolean mSurfaceHighBitDepth = false;
-    // The SurfaceView surfaces the native side let go of. Written on the main
-    // thread, read on the present thread (see onFirstFramePresented).
-    private volatile int mSurfacesReleased = 0;
 
     private final SurfaceFrameRateVote mFrameRateVote = new SurfaceFrameRateVote(this);
     private final Runnable mOnFrameConsumed = this::onFrameConsumed;
@@ -304,12 +302,12 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
      */
     @DoNotStrip
     public void onFirstFramePresented() {
-        final int surfacesReleased = mSurfacesReleased;
-        post(() -> {
-            if (surfacesReleased == mSurfacesReleased && mKind == BackingViewKind.SURFACE_VIEW) {
-                ((SkiaSurfaceView) mView).onFirstFramePresented();
-            }
-        });
+        if (mKind != BackingViewKind.SURFACE_VIEW) {
+            return;
+        }
+        final SkiaSurfaceView surfaceView = (SkiaSurfaceView) mView;
+        final int surface = surfaceView.currentSurface();
+        post(() -> surfaceView.onFirstFramePresented(surface));
     }
 
     /**
@@ -429,9 +427,6 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
             return;
         }
         surfaceDestroyed();
-        // The native side has waited for the present in flight: a first frame
-        // reported from now on is the next surface's.
-        mSurfacesReleased++;
     }
 
     // Native ---------------------------------------------------------------
