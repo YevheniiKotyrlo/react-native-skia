@@ -1,13 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import type { NativeScrollEvent, NativeSyntheticEvent } from "react-native";
 import { ScrollView, View } from "react-native";
-import {
-  Canvas,
-  createPicture,
-  Fill,
-  Skia,
-  SkiaPictureView,
-} from "react-native-skia";
+import { Canvas, createPicture, Fill, Picture, Skia } from "react-native-skia";
 import { useAnimatedReaction, useSharedValue } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";
 import { exhaustiveCheck } from "react-native-skia/src/renderer/typeddash";
@@ -29,14 +23,14 @@ interface ClippedSubviewsProps {
   roundTrips: number;
 }
 
-// A canvas (red, or cyan once changed) beside a picture view and a graphite
-// view (both cyan), at the top of a scroll view that clips its subviews. They
-// mount unclipped, so that their native views are in the window first; then
-// clipping is turned on and the scroll view goes away and back, roundTrips
-// times, each step once the scroll view reports the offset of the one before.
-// A change is made while away: React state, a shared value, or the GPU device
-// lost and replaced. React Native flattens the row, so the views themselves
-// leave their superview while away.
+// A canvas (red, or cyan once changed) beside a canvas drawing a picture and
+// a graphite view (both cyan), at the top of a scroll view that clips its
+// subviews. They mount unclipped, so that their native views are in the window
+// first; then clipping is turned on and the scroll view goes away and back,
+// roundTrips times, each step once the scroll view reports the offset of the
+// one before. A change is made while away: React state, a shared value, or the
+// GPU device lost and replaced. React Native flattens the row, so the views
+// themselves leave their superview while away.
 const ClippedSubviews = ({ change, roundTrips }: ClippedSubviewsProps) => {
   const scrollView = useRef<ScrollView>(null);
   const tripsLeft = useRef(roundTrips);
@@ -120,7 +114,9 @@ const ClippedSubviews = ({ change, roundTrips }: ClippedSubviewsProps) => {
         <Canvas style={{ flex: 1 }}>
           <Fill color={change === "sharedValue" ? sharedColor : color} />
         </Canvas>
-        <SkiaPictureView style={{ flex: 1 }} picture={cyan} />
+        <Canvas style={{ flex: 1 }}>
+          <Picture picture={cyan} />
+        </Canvas>
         <CyanGraphiteView style={{ flex: 1 }} />
       </View>
       <View style={{ height: 2 * AWAY }} />
