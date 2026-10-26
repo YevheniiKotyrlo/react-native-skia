@@ -1,7 +1,14 @@
 import React, { useEffect, useRef, useState } from "react";
 import type { NativeScrollEvent, NativeSyntheticEvent } from "react-native";
 import { ScrollView, View } from "react-native";
-import { Canvas, createPicture, Fill, Picture, Skia } from "react-native-skia";
+import {
+  Canvas,
+  createPicture,
+  Fill,
+  Picture,
+  Skia,
+  useCanvasRef,
+} from "react-native-skia";
 import { useAnimatedReaction, useSharedValue } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";
 import { exhaustiveCheck } from "react-native-skia/src/renderer/typeddash";
@@ -38,9 +45,15 @@ const ClippedSubviews = ({ change, roundTrips }: ClippedSubviewsProps) => {
   const [color, setColor] = useState("red");
   const sharedColor = useSharedValue("red");
   const deviceLost = useRef(false);
+  const pictureCanvas = useCanvasRef();
   const done = useScreenDone();
   const scrollBack = () =>
     scrollView.current?.scrollTo({ y: 0, animated: false });
+  // The picture's canvas asks for a redraw on every render, so a render while
+  // it is away asks one of a view with no window attached.
+  useEffect(() => {
+    pictureCanvas.current?.redraw();
+  });
   useEffect(() => {
     if (!clipped) {
       setClipped(true);
@@ -114,7 +127,7 @@ const ClippedSubviews = ({ change, roundTrips }: ClippedSubviewsProps) => {
         <Canvas style={{ flex: 1 }}>
           <Fill color={change === "sharedValue" ? sharedColor : color} />
         </Canvas>
-        <Canvas style={{ flex: 1 }}>
+        <Canvas ref={pictureCanvas} style={{ flex: 1 }}>
           <Picture picture={cyan} />
         </Canvas>
         <CyanGraphiteView style={{ flex: 1 }} />
