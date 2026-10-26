@@ -32,9 +32,7 @@ import {
 // TextureView keeps the clip, the alpha and the stacking order, while a
 // SurfaceView punches through all of them. The zOrderOnTop switch then moves
 // the SurfaceView above the whole window, and zOrderMediaOverlay above the
-// other SurfaceView. The mounted switch mounts the canvas afresh, and the
-// parent clips switch takes the clip away, so the stripes around a
-// SurfaceView must survive its hole.
+// other SurfaceView. The mounted switch mounts the canvas afresh.
 
 const backingViews: AndroidBackingView[] = [
   "TextureView",
@@ -78,7 +76,6 @@ export const AndroidViews = () => {
   const [zOrderMediaOverlay, setZOrderMediaOverlay] = useState(false);
   const [animate, setAnimate] = useState(true);
   const [mounted, setMounted] = useState(true);
-  const [parentClips, setParentClips] = useState(true);
   const clock = useClock();
   const cx = useDerivedValue(
     () => 100 + 60 * Math.sin(clock.value / 500),
@@ -119,7 +116,7 @@ export const AndroidViews = () => {
       <View style={styles.stage}>
         <Stripes />
         <View style={styles.frame}>
-          <View style={[styles.clip, !parentClips && styles.unclipped]}>
+          <View style={styles.clip}>
             {mounted && (
               <Canvas key={backingKey} style={styles.canvas} android={android}>
                 <Fill>
@@ -215,10 +212,6 @@ export const AndroidViews = () => {
           <Text style={styles.label}>mounted</Text>
           <Switch value={mounted} onValueChange={setMounted} />
         </View>
-        <View style={styles.row}>
-          <Text style={styles.label}>parent clips</Text>
-          <Switch value={parentClips} onValueChange={setParentClips} />
-        </View>
         <Text style={styles.hint}>
           The backing view is created when the canvas mounts: a chip remounts
           the canvas (HardwareBufferView is not available in Skia yet and falls
@@ -256,9 +249,6 @@ const styles = StyleSheet.create({
     borderRadius: 32,
     overflow: "hidden",
     transform: [{ rotate: "-6deg" }],
-  },
-  unclipped: {
-    overflow: "visible",
   },
   canvas: {
     width: 260,
