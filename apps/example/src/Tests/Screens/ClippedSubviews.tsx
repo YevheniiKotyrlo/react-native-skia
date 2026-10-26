@@ -1,6 +1,8 @@
-import React, { useEffect, useRef, useState } from "react";
+import type { RefObject } from "react";
+import React, { memo, useEffect, useRef, useState } from "react";
 import type { NativeScrollEvent, NativeSyntheticEvent } from "react-native";
 import { ScrollView, View } from "react-native";
+import type { CanvasRef } from "react-native-skia";
 import {
   Canvas,
   createPicture,
@@ -22,6 +24,19 @@ const ROW_HEIGHT = 1000;
 const AWAY = 4 * ROW_HEIGHT;
 
 const cyan = createPicture((canvas) => canvas.drawColor(Skia.Color("cyan")));
+
+// A canvas whose content never changes: React leaves it alone when the screen
+// renders again, so all it is asked for then is a redraw.
+const PictureCanvasContent = ({
+  canvasRef,
+}: {
+  canvasRef: RefObject<CanvasRef | null>;
+}) => (
+  <Canvas ref={canvasRef} style={{ flex: 1 }}>
+    <Picture picture={cyan} />
+  </Canvas>
+);
+const PictureCanvas = memo(PictureCanvasContent);
 
 type Change = "nothing" | "state" | "sharedValue" | "deviceLost";
 
@@ -49,8 +64,8 @@ const ClippedSubviews = ({ change, roundTrips }: ClippedSubviewsProps) => {
   const done = useScreenDone();
   const scrollBack = () =>
     scrollView.current?.scrollTo({ y: 0, animated: false });
-  // The picture's canvas asks for a redraw on every render, so a render while
-  // it is away asks one of a view with no window attached.
+  // Every render asks the picture's canvas for a redraw, so a render while it
+  // is away asks a view with no window attached for one.
   useEffect(() => {
     pictureCanvas.current?.redraw();
   });
@@ -127,9 +142,7 @@ const ClippedSubviews = ({ change, roundTrips }: ClippedSubviewsProps) => {
         <Canvas style={{ flex: 1 }}>
           <Fill color={change === "sharedValue" ? sharedColor : color} />
         </Canvas>
-        <Canvas ref={pictureCanvas} style={{ flex: 1 }}>
-          <Picture picture={cyan} />
-        </Canvas>
+        <PictureCanvas canvasRef={pictureCanvas} />
         <CyanGraphiteView style={{ flex: 1 }} />
       </View>
       <View style={{ height: 2 * AWAY }} />
