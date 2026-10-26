@@ -8,6 +8,7 @@ import {
   Picture,
   Skia,
   SkiaImageView,
+  useCanvasRef,
 } from "react-native-skia";
 import { useAnimatedReaction, useSharedValue } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";
@@ -59,9 +60,15 @@ const ClippedSubviews = ({ change, roundTrips, row }: ClippedSubviewsProps) => {
   const sharedColor = useSharedValue("red");
   const deviceLost = useRef(false);
   const [cyanImage] = useState(makeCyanImage);
+  const pictureCanvas = useCanvasRef();
   const done = useScreenDone();
   const scrollBack = () =>
     scrollView.current?.scrollTo({ y: 0, animated: false });
+  // The picture's canvas asks for a redraw on every render, so a render while
+  // it is away asks one of a view with no window attached.
+  useEffect(() => {
+    pictureCanvas.current?.redraw();
+  });
   useEffect(() => {
     if (!clipped) {
       setClipped(true);
@@ -139,7 +146,7 @@ const ClippedSubviews = ({ change, roundTrips, row }: ClippedSubviewsProps) => {
           <SkiaImageView style={{ flex: 1 }} image={cyanImage} />
         ) : (
           <>
-            <Canvas style={{ flex: 1 }}>
+            <Canvas ref={pictureCanvas} style={{ flex: 1 }}>
               <Picture picture={cyan} />
             </Canvas>
             <CyanGraphiteView style={{ flex: 1 }} />
