@@ -5,9 +5,9 @@ import {
   Canvas,
   createPicture,
   Fill,
+  Picture,
   Skia,
   SkiaImageView,
-  SkiaPictureView,
 } from "react-native-skia";
 import { useAnimatedReaction, useSharedValue } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";
@@ -32,8 +32,8 @@ const makeCyanImage = () => {
 
 type Change = "nothing" | "state" | "sharedValue" | "deviceLost";
 
-// The views in the row: a canvas beside a picture view and a graphite view,
-// or a static canvas beside an image view.
+// The views in the row: a canvas beside a canvas drawing a picture and a
+// graphite view, or a static canvas beside an image view.
 type Row = "canvas" | "static";
 
 interface ClippedSubviewsProps {
@@ -42,15 +42,15 @@ interface ClippedSubviewsProps {
   row: Row;
 }
 
-// A canvas (red, or cyan once changed) beside a picture view and a graphite
-// view (both cyan), or a static canvas (the same) beside an image view (cyan),
-// at the top of a scroll view that clips its subviews. They mount unclipped, so
-// that their native views are in the window first; then clipping is turned on
-// and the scroll view goes away and back, roundTrips times, each step once the
-// scroll view reports the offset of the one before. A change is made while
-// away: React state, a shared value, or the GPU device lost and replaced. React
-// Native flattens the row, so the views themselves leave their superview while
-// away.
+// A canvas (red, or cyan once changed) beside a canvas drawing a picture and
+// a graphite view (both cyan), or a static canvas (the same) beside an image
+// view (cyan), at the top of a scroll view that clips its subviews. They mount
+// unclipped, so that their native views are in the window first; then clipping
+// is turned on and the scroll view goes away and back, roundTrips times, each
+// step once the scroll view reports the offset of the one before. A change is
+// made while away: React state, a shared value, or the GPU device lost and
+// replaced. React Native flattens the row, so the views themselves leave their
+// superview while away.
 const ClippedSubviews = ({ change, roundTrips, row }: ClippedSubviewsProps) => {
   const scrollView = useRef<ScrollView>(null);
   const tripsLeft = useRef(roundTrips);
@@ -139,7 +139,9 @@ const ClippedSubviews = ({ change, roundTrips, row }: ClippedSubviewsProps) => {
           <SkiaImageView style={{ flex: 1 }} image={cyanImage} />
         ) : (
           <>
-            <SkiaPictureView style={{ flex: 1 }} picture={cyan} />
+            <Canvas style={{ flex: 1 }}>
+              <Picture picture={cyan} />
+            </Canvas>
             <CyanGraphiteView style={{ flex: 1 }} />
           </>
         )}
