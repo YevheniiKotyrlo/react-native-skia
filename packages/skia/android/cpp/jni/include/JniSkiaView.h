@@ -1,10 +1,13 @@
 #pragma once
 
 #include <atomic>
+#include <functional>
 #include <memory>
+#include <utility>
 
 #include <android/native_window.h>
 #include <android/native_window_jni.h>
+#include <fbjni/NativeRunnable.h>
 #include <fbjni/fbjni.h>
 #include <jni.h>
 
@@ -19,7 +22,9 @@ namespace jni = facebook::jni;
 /**
  * The JNI side of SkiaView: owns the native view and the window surface it
  * presents into, and relays the surface callbacks of the backing SurfaceView
- * or TextureView, whose ANativeWindow it acquires for the surface.
+ * or TextureView, whose ANativeWindow it acquires for the surface. The
+ * surface callbacks come on the main thread; the view presents on the present
+ * thread of the Java side (see SkiaView.runOnPresentThread).
  */
 class JniSkiaView : public jni::HybridClass<JniSkiaView> {
 public:
@@ -54,27 +59,32 @@ public:
   std::shared_ptr<RNSkManager> getSkiaManager() { return _manager.lock(); }
 
 protected:
+  // Main thread. Attaching the window asks the view for a frame on the
+  // present thread.
   void surfaceAvailable(jobject surface, int width, int height, bool isSurface,
                         bool highBitDepth) {
     attachWindow(surface, width, height, isSurface, highBitDepth);
-    _view->redraw();
   }
 
+  // Main thread. The new size is painted on the present thread, which the
+  // surface asks for a frame once it is reconfigured.
   void surfaceSizeChanged(jobject surface, int width, int height,
                           bool isSurface, bool highBitDepth) {
     // Setting width/height to zero is nothing we need to care about when
     // it comes to invalidating the surface.
-    if (width != 0 || height != 0) {
-      if (_surface->isAttached()) {
-        _surface->resize(width, height);
-      } else {
-        attachWindow(surface, width, height, isSurface, highBitDepth);
-      }
+    if (width == 0 && height == 0) {
+      return;
     }
-    // Paint the new size right away rather than on the next scheduled redraw.
-    _view->redraw();
+    if (_surface->isAttached()) {
+      _surface->resize(width, height);
+    } else {
+      attachWindow(surface, width, height, isSurface, highBitDepth);
+    }
   }
 
+  // Main thread, before the platform destroys the window: waits for the
+  // present in flight, if any, then lets go of the window (see
+  // RNSkWindowSurface::detach).
   void surfaceDestroyed() {
     _awaitingFirstFrame->store(false);
     _surface->detach();
@@ -120,9 +130,11 @@ protected:
     manager->unregisterSkiaView(_view->getNativeId());
   }
 
-  // Choreographer tick: presents the queued recordings, returns whether more
-  // are already waiting.
-  bool presentFrame() { return _view->presentFrame(); }
+  // The Java view's frame scheduler, on the thread the view presents on:
+  // presents the queued recordings, says whether a frame went to the window
+  // and whether more are waiting (see RNSkView::presentFrame). The Java view
+  // keeps this object alive for the call (see SkiaView.dropInstance).
+  int presentFrame() { return _view->presentFrame(); }
 
 private:
   friend HybridBase;
@@ -134,13 +146,16 @@ private:
     _surface = std::make_shared<RNSkWindowSurface>();
     // Weak: the Java view owns this object through its hybrid data, and the
     // surface is shared with the view and can outlive this object.
-    jni::weak_ref<jhybridobject> weakJava = jni::make_weak(jThis);
+    auto javaView = std::make_shared<JavaView>(jThis);
+    // The first frame presented into a SurfaceView's window, on the present
+    // thread: the Java view opens its draw gate on the main thread.
     _surface->setDidPresent(
-        [weakJava, awaitingFirstFrame = _awaitingFirstFrame]() {
+        [javaView, awaitingFirstFrame = _awaitingFirstFrame]() {
           if (!awaitingFirstFrame->exchange(false)) {
             return;
           }
-          auto javaPart = weakJava.lockLocal();
+          jni::ThreadScope threadScope;
+          auto javaPart = javaView->weak->lockLocal();
           if (!javaPart) {
             return;
           }
@@ -149,17 +164,53 @@ private:
           method(javaPart);
         });
     _view = std::make_shared<RNSkView>(context, _surface);
-    // A submitted recording arms the Java view's frame callback.
-    _view->setFrameScheduler([weakJava]() {
-      auto javaPart = weakJava.lockLocal();
+    // Tasks for the present thread go through the Java view, which owns the
+    // thread. A task for a view that is gone is dropped. Called from any
+    // thread, the render thread pool's included, hence the thread scope.
+    _view->setPresentThread([javaView](std::function<void()> task) {
+      jni::ThreadScope threadScope;
+      auto javaPart = javaView->weak->lockLocal();
       if (!javaPart) {
         return;
       }
       static const auto method =
-          javaPart->getClass()->getMethod<void()>("scheduleFrame");
-      method(javaPart);
+          javaPart->getClass()
+              ->getMethod<void(jni::alias_ref<jni::JRunnable::javaobject>)>(
+                  "runOnPresentThread");
+      method(javaPart, jni::JNativeRunnable::newObjectCxxArgs(std::move(task)));
+    });
+    // A submitted recording arms the Java view's frame callback, on the
+    // present thread (or presents on the spot, for a window resized since
+    // the frame it shows: see FrameScheduler.requestFrame).
+    _view->setFrameScheduler([javaView](bool forResizedWindow) {
+      auto javaPart = javaView->weak->lockLocal();
+      if (!javaPart) {
+        return;
+      }
+      static const auto method =
+          javaPart->getClass()->getMethod<void(jboolean)>("scheduleFrame");
+      method(javaPart, static_cast<jboolean>(forResizedWindow));
     });
   }
+
+  /**
+   A weak reference to the Java view for the callbacks the native view hands
+   out, which are copied and destroyed on whichever thread holds them last
+   (the target copies the frame request on the render thread that submits a
+   recording). A JNI reference needs the thread attached to the JVM to be
+   made or let go of, which such a thread is not: the callbacks share one,
+   made here and released under a thread scope.
+   */
+  struct JavaView {
+    explicit JavaView(jni::alias_ref<jhybridobject> jThis)
+        : weak(std::make_unique<jni::weak_ref<jhybridobject>>(
+              jni::make_weak(jThis))) {}
+    ~JavaView() {
+      jni::ThreadScope threadScope;
+      weak.reset();
+    }
+    std::unique_ptr<jni::weak_ref<jhybridobject>> weak;
+  };
 
   /**
    Takes the ANativeWindow behind an android.view.Surface (SurfaceView) or a
@@ -170,6 +221,9 @@ private:
                     bool highBitDepth) {
     // Release the old surface and its window first.
     _surface->detach();
+    // A TextureView draws the latest frame presented to it; a SurfaceView's
+    // frames show in turn (see RNSkView::setWindowTakesLatestFrame).
+    _view->setWindowTakesLatestFrame(!isSurface);
     JNIEnv *env = jni::Environment::current();
     jobject jSurface = surface;
     // The Surface created over a TextureView's SurfaceTexture; it lives as
