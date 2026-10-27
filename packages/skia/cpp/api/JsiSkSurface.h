@@ -3,7 +3,10 @@
 #include <algorithm>
 #include <limits>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <utility>
+#include <vector>
 
 #include <jsi/jsi.h>
 
@@ -104,9 +107,48 @@ public:
       throw std::runtime_error(
           "asImage: the texture of the surface cannot be sampled");
     }
-    // The surface already reports the texture as its memory.
-    return std::make_shared<JsiSkImage>(getContext(), std::move(image),
-                                        sharesTexture);
+    if (!sharesTexture) {
+      return std::make_shared<JsiSkImage>(getContext(), std::move(image));
+    }
+    // The surface reports the texture as its memory until it is disposed (see
+    // dispose).
+    std::lock_guard<std::mutex> lock(_textureChargeMutex);
+    auto jsiImage = std::make_shared<JsiSkImage>(getContext(), std::move(image),
+                                                 _textureCharge);
+    _sharedImages.push_back(jsiImage);
+    if (_sharedImages.size() >= _pruneSharedImagesAt) {
+      _sharedImages.erase(
+          std::remove_if(_sharedImages.begin(), _sharedImages.end(),
+                         [](const std::weak_ptr<JsiSkImage> &sharedImage) {
+                           return sharedImage.expired();
+                         }),
+          _sharedImages.end());
+      _pruneSharedImagesAt =
+          std::max(kMinPruneSharedImagesAt, _sharedImages.size() * 2);
+    }
+    return jsiImage;
+  }
+
+  // The texture outlives the disposed surface in the images that still hold
+  // it. On each runtime holding one of them, one object charges it, kept
+  // reachable by those images' wrappers there, until the last of them is
+  // disposed or collected.
+  JSI_HOST_FUNCTION(dispose) {
+    std::shared_ptr<SharedTextureCharge> textureCharge;
+    std::vector<std::weak_ptr<JsiSkImage>> sharedImages;
+    {
+      std::lock_guard<std::mutex> lock(_textureChargeMutex);
+      textureCharge = std::move(_textureCharge);
+      sharedImages.swap(_sharedImages);
+    }
+    auto result =
+        JsiSkWrappingSkPtrNativeObject<JsiSkSurface, SkSurface>::dispose(
+            runtime, thisValue, arguments, count);
+    if (textureCharge != nullptr && textureCharge->hasHolders()) {
+      textureCharge->markReleased();
+      chargeSharedTexture(runtime, textureCharge, sharedImages);
+    }
+    return result;
   }
 
   JSI_HOST_FUNCTION(makeImageSnapshot) {
@@ -127,7 +169,8 @@ public:
     }
     if (count > 1 && arguments[1].isObject()) {
       auto jsiImage = getJsiObject<JsiSkImage>(runtime, arguments[1]);
-      jsiImage->setObject(image);
+      jsiImage->replaceImage(runtime, arguments[1].asObject(runtime),
+                             std::move(image));
       return jsi::Value(runtime, arguments[1]);
     }
     return makeJsiObject(
@@ -200,6 +243,10 @@ public:
 
 protected:
   void releaseResources() override {
+    {
+      std::lock_guard<std::mutex> lock(_textureChargeMutex);
+      _textureCharge.reset();
+    }
     // dispose(): the canvas lets go of its reference too, so that the texture
     // is freed now rather than once the canvas is collected (#4275). Drawing
     // on the canvas throws from here on.
@@ -220,8 +267,48 @@ private:
     _dispatcher->release(std::move(surface));
   }
 
+  // Charges this runtime for the texture through the wrappers it holds, which
+  // all keep one charge object under one key. A runtime holding only an
+  // image's wrapper made elsewhere is charged when it converts the image next
+  // (see JsiSkImage::create).
+  static void chargeSharedTexture(
+      jsi::Runtime &runtime,
+      const std::shared_ptr<SharedTextureCharge> &textureCharge,
+      const std::vector<std::weak_ptr<JsiSkImage>> &sharedImages) {
+    auto &cache = RNJsi::JSICache::get(runtime);
+    std::optional<std::pair<jsi::PropNameID, jsi::Value>> charge;
+    for (const auto &sharedImage : sharedImages) {
+      auto image = sharedImage.lock();
+      if (image == nullptr || !image->holdsTexture()) {
+        continue;
+      }
+      auto wrapper = cache.lockWrapper(runtime, image.get());
+      if (!wrapper.isObject()) {
+        continue;
+      }
+      if (!charge.has_value()) {
+        charge.emplace(
+            JsiSkImage::textureChargeKey(runtime),
+            JsiSkImage::resolveRuntimeCharge(runtime, textureCharge));
+      }
+      wrapper.getObject(runtime).setProperty(runtime, charge->first,
+                                             charge->second);
+    }
+  }
+
   std::shared_ptr<Dispatcher> _dispatcher;
   std::shared_ptr<JsiSkCanvas> _canvas;
+  std::mutex _textureChargeMutex;
+  // Alive while the surface or a disposed surface's charge object reports the
+  // texture as memory; the images sharing the texture watch it.
+  std::shared_ptr<SharedTextureCharge> _textureCharge =
+      std::make_shared<SharedTextureCharge>();
+  // The images sharing the texture. Entries of collected images are pruned in
+  // asImage once the list has doubled since the last pruning, so it stays
+  // proportional to the number of live images.
+  std::vector<std::weak_ptr<JsiSkImage>> _sharedImages;
+  size_t _pruneSharedImagesAt = kMinPruneSharedImagesAt;
+  static constexpr size_t kMinPruneSharedImagesAt = 64;
 };
 
 } // namespace RNSkia
