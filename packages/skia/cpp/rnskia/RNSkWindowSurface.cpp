@@ -331,8 +331,8 @@ bool RNSkWindowSurface::canPresentLocked() {
   // in the background. A window whose surface is away for the replacement
   // (see ensureDeviceLocked) can: presenting is what brings the surface
   // back.
-  return _nativeHandle != nullptr && !DawnContext::isDeviceLost() &&
-         (!_canPresent || _canPresent());
+  return _nativeHandle != nullptr && !_presentsHeld &&
+         !DawnContext::isDeviceLost() && (!_canPresent || _canPresent());
 }
 
 bool RNSkWindowSurface::isTargetLocked(const RNSkGraphiteTargetInfo &target) {

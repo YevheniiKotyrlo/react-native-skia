@@ -160,9 +160,17 @@ public:
   }
 
   /**
-   Whether a window is attached and can show a frame right now: not while
-   the platform view says it cannot, nor once the GPU device is lost. Any
-   thread.
+   Declines every present while held: the platform view holds the presents
+   of a window whose layer shows before the window frame that lays it out,
+   and asks for them again once it lets go (see
+   RNSkView::requestDeclinedFrame). Main thread.
+   */
+  void setPresentsHeld(bool held) { _presentsHeld = held; }
+
+  /**
+   Whether a window is attached and can show a frame right now: not while its
+   presents are held or the platform view says it cannot, nor once the GPU
+   device is lost. Any thread.
    */
   bool canPresent();
 
@@ -318,6 +326,7 @@ private:
 
   std::function<void()> _requestRedraw;
   std::function<bool()> _canPresent;
+  std::atomic<bool> _presentsHeld{false};
 };
 
 } // namespace RNSkia

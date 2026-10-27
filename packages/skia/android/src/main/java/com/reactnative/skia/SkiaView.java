@@ -413,6 +413,22 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
         surfaceDestroyed();
     }
 
+    @Override
+    public void holdFirstFrame() {
+        if (!hasNativeView()) {
+            return;
+        }
+        holdPresents();
+    }
+
+    @Override
+    public void releaseFirstFrame() {
+        if (!hasNativeView()) {
+            return;
+        }
+        releasePresents();
+    }
+
     // Native ---------------------------------------------------------------
 
     private native HybridData initHybrid(SkiaManager skiaManager);
@@ -439,4 +455,12 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
      * Present thread, under mNativeLock.
      */
     private native int presentFrame();
+
+    private native void holdPresents();
+
+    /**
+     * Lets go of holdPresents(): what the window declined meanwhile is asked
+     * for again on the present thread, right away.
+     */
+    private native void releasePresents();
 }
