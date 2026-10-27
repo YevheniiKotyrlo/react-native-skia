@@ -57,12 +57,21 @@ final class FirstFrameDrawGate {
         void invalidate();
     }
 
+    /** What the surface's layer shows; the view opens its hole over a frame only. */
+    private enum FrameState {
+        /** No frame. */
+        NONE,
+        /** The last frame of a surface a format change replaced, until the new surface's first. */
+        REPLACED,
+        /** A frame presented into the current surface. */
+        PRESENTED,
+    }
+
     private final Host mHost;
     private final boolean mWindowWaitBoundedByPlatform;
     private final boolean mDrawReportRemovesReplacedLayer;
     private final Runnable mFirstFrameDeadline = this::onFirstFrameDeadline;
-    private boolean mFramePresented = false;
-    private boolean mFrameShown = false;
+    private FrameState mFrameState = FrameState.NONE;
     private int mFormat = PixelFormat.UNKNOWN;
     private boolean mChangingFormat = false;
     private boolean mDeadlinePosted = false;
@@ -79,7 +88,7 @@ final class FirstFrameDrawGate {
 
     /** Whether the surface's layer shows a frame: the view opens its hole only then. */
     boolean hasFrame() {
-        return mFrameShown;
+        return mFrameState != FrameState.NONE;
     }
 
     /**
@@ -104,15 +113,12 @@ final class FirstFrameDrawGate {
 
     /** A new surface: nothing has been presented into it yet. */
     void onSurfaceCreated() {
-        mFramePresented = false;
-        if (!mChangingFormat) {
-            setFrameShown(false);
-        }
+        applyFrameState(mChangingFormat ? resolveReplacedFrameState() : FrameState.NONE);
     }
 
     /** The window asks to be told once the surface has drawn. */
     void onRedrawNeeded(Runnable drawingFinished) {
-        if (mFramePresented) {
+        if (mFrameState == FrameState.PRESENTED) {
             drawingFinished.run();
             return;
         }
@@ -139,8 +145,7 @@ final class FirstFrameDrawGate {
         if (surface != mSurfacesReleased) {
             return;
         }
-        mFramePresented = true;
-        setFrameShown(true);
+        applyFrameState(FrameState.PRESENTED);
         cancelDeadline();
         reportPendingDraws();
     }
@@ -154,10 +159,7 @@ final class FirstFrameDrawGate {
     void onSurfaceReleased(Runnable releaseNative) {
         releaseNative.run();
         mSurfacesReleased++;
-        mFramePresented = false;
-        if (!mChangingFormat) {
-            setFrameShown(false);
-        }
+        applyFrameState(mChangingFormat ? resolveReplacedFrameState() : FrameState.NONE);
         cancelDeadline();
         reportPendingDraws();
     }
@@ -173,9 +175,18 @@ final class FirstFrameDrawGate {
         reportPendingDraws();
     }
 
-    private void setFrameShown(boolean frameShown) {
-        if (mFrameShown != frameShown) {
-            mFrameShown = frameShown;
+    // A surface a format change replaces leaves its frame on screen, if it had one.
+    private FrameState resolveReplacedFrameState() {
+        return switch (mFrameState) {
+            case NONE -> FrameState.NONE;
+            case REPLACED, PRESENTED -> FrameState.REPLACED;
+        };
+    }
+
+    private void applyFrameState(FrameState frameState) {
+        boolean hadFrame = hasFrame();
+        mFrameState = frameState;
+        if (hadFrame != hasFrame()) {
             mHost.invalidate();
         }
     }
@@ -191,8 +202,8 @@ final class FirstFrameDrawGate {
         if (mPendingDrawsFinished.isEmpty()) {
             return;
         }
-        if (mDrawReportRemovesReplacedLayer && !mFramePresented) {
-            setFrameShown(false);
+        if (mDrawReportRemovesReplacedLayer && mFrameState == FrameState.REPLACED) {
+            applyFrameState(FrameState.NONE);
         }
         ArrayList<Runnable> pending = new ArrayList<>(mPendingDrawsFinished);
         mPendingDrawsFinished.clear();
