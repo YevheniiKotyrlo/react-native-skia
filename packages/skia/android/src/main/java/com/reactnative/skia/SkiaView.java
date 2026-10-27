@@ -32,6 +32,10 @@ import com.facebook.react.views.view.ReactViewGroup;
  * hands it over to the scheduler. The native view is destroyed on the main
  * thread while the present thread may be presenting (see dropInstance): a
  * lock keeps the two apart.
+ *
+ * A static canvas has no backing view: an image child (see SkiaImageView)
+ * shows its frames, which the native side presents as images on a thread of
+ * its own (see RNSkView::presentAsImages), never through the frame scheduler.
  */
 public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreographer.FrameCallback {
     private static final String TAG = "SkiaView";
@@ -49,6 +53,7 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
     // (see takesZOrder); the others are read once, when the backing view is
     // created (see updateView()).
     private BackingViewKind mBackingView = BackingViewKind.TEXTURE_VIEW;
+    private boolean mStaticPresentation = false;
     private boolean mOpaque = false;
     private boolean mZOrderOnTop = false;
     private boolean mZOrderMediaOverlay = false;
@@ -65,6 +70,10 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
     // The SurfaceView surfaces the native side let go of. Written on the main
     // thread, read on the present thread (see onFirstFramePresented).
     private volatile int mSurfacesReleased = 0;
+
+    // The id the last transaction set, registered once the transaction is
+    // complete (see registerPendingView); 0 when there is none to register.
+    private int mPendingNativeId = 0;
 
     private final SurfaceFrameRateVote mFrameRateVote = new SurfaceFrameRateVote(this);
     private final Runnable mOnFrameConsumed = this::onFrameConsumed;
@@ -146,6 +155,14 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
             return;
         }
         mBackingView = BackingViewKind.fromBackingView(value);
+    }
+
+    public void setStaticPresentation(boolean value) {
+        if (mKind != null) {
+            warnIgnoredOnceMounted("static");
+            return;
+        }
+        mStaticPresentation = value;
     }
 
     public void setOpaque(boolean value) {
@@ -235,11 +252,17 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
                     surfaceView.setZOrder(mZOrderOnTop, mZOrderMediaOverlay);
                 }
                 case TEXTURE_VIEW -> ((SkiaTextureView) mView).setOpaque(opaque);
+                case IMAGE -> {
+                }
             }
             return;
         }
-        kind = mBackingView;
+        kind = mStaticPresentation ? BackingViewKind.IMAGE : mBackingView;
         mKind = kind;
+        // Before the view registers its id (see registerPendingView).
+        if (kind == BackingViewKind.IMAGE && hasNativeView()) {
+            presentAsImages();
+        }
         mSurfaceHighBitDepth = BackingViewKind.resolveHighBitDepth(kind, mHighBitDepth);
         if (mHighBitDepth && !mSurfaceHighBitDepth) {
             Log.w(TAG, "highBitDepth needs a SurfaceView on Android, keeping the 8-bit format");
@@ -254,6 +277,7 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
             case SURFACE_VIEW -> new SkiaSurfaceView(getContext(), this, mZOrderOnTop,
                     mZOrderMediaOverlay, opaque);
             case TEXTURE_VIEW -> new SkiaTextureView(getContext(), this, opaque);
+            case IMAGE -> new SkiaImageView(getContext());
         };
         addView(mView);
         // React Native sizes native children explicitly through onLayout, so
@@ -261,7 +285,39 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
         // child ourselves or it stays 0x0 and never gets a surface.
         if (getWidth() > 0 || getHeight() > 0) {
             mView.layout(0, 0, getWidth(), getHeight());
+            if (kind == BackingViewKind.IMAGE && hasNativeView()) {
+                imagePresenterLaidOut(getWidth(), getHeight());
+            }
         }
+    }
+
+    void setPendingNativeId(int nativeId) {
+        mPendingNativeId = nativeId;
+    }
+
+    // Registers the id the transaction set, once updateView() has applied the
+    // transaction: a static canvas's native view takes the thread it presents
+    // on before it is bound to its id (see updateView).
+    void registerPendingView() {
+        if (mPendingNativeId != 0 && hasNativeView()) {
+            registerView(mPendingNativeId);
+        }
+        mPendingNativeId = 0;
+    }
+
+    /**
+     * The frame a static canvas shows now, by image id (see SkiaImageView). Called from native on the thread that
+     * presents the frames; shown on the main thread in order with the bitmaps' publish and discard, unless the view
+     * was dropped meanwhile. Not View.post(), which off the main thread holds the request until the view is
+     * attached to a window again.
+     */
+    @DoNotStrip
+    public void showPresentedImage(long imageId) {
+        SkiaPresentedImages.post(() -> {
+            if (hasNativeView() && mView instanceof SkiaImageView imageView) {
+                imageView.setPresentedImageId(imageId);
+            }
+        });
     }
 
     // React drops the view for good: it is never recycled (ReactViewManager
@@ -277,6 +333,9 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
         synchronized (mNativeLock) {
             if (!hasNativeView()) {
                 return;
+            }
+            if (mView instanceof SkiaImageView imageView) {
+                imageView.setPresentedImageId(0);
             }
             unregisterView();
             mHybridData.resetNative();
@@ -301,6 +360,9 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
         }
         if (mView != null) {
             mView.layout(0, 0, right - left, bottom - top);
+        }
+        if (mKind == BackingViewKind.IMAGE && hasNativeView()) {
+            imagePresenterLaidOut(right - left, bottom - top);
         }
     }
 
@@ -472,6 +534,10 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
     private native void surfaceDestroyed();
 
     private native void setLayoutSize(int width, int height);
+
+    private native void presentAsImages();
+
+    private native void imagePresenterLaidOut(int width, int height);
 
     private native void setSurfaceHighBitDepth(boolean highBitDepth);
 

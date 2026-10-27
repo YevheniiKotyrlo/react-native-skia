@@ -9,6 +9,8 @@ import type { AndroidCanvasProps } from "./types";
 export interface BackingViewProps {
   highBitDepth?: boolean;
   android?: AndroidCanvasProps;
+  // A static canvas has no backing view: it shows its frames as 8-bit images.
+  static?: boolean;
 }
 
 type AndroidNativePropName =
@@ -94,14 +96,28 @@ const warnIgnoredChange = (prop: string) =>
 /**
  * Warns, in development on Android, about options a mounting canvas asks for
  * that the native view cannot honour (see BackingViewKind.java, whose rules
- * these mirror). The native side only says so in logcat, which is not where a
- * JS developer looks.
+ * these mirror), and on iOS too for a static canvas asking for highBitDepth.
+ * The native side only says so in logcat, which is not where a JS developer
+ * looks.
  */
 export const warnBackingViewAtMount = ({
   highBitDepth,
   android,
+  static: isStatic,
 }: BackingViewProps) => {
-  if (!__DEV__ || Platform.OS !== "android") {
+  if (!__DEV__ || Platform.OS === "web") {
+    return;
+  }
+  if (isStatic) {
+    if (highBitDepth) {
+      console.warn(
+        "Ignoring highBitDepth: a static canvas shows its frames as 8-bit " +
+          "images."
+      );
+    }
+    return;
+  }
+  if (Platform.OS !== "android") {
     return;
   }
   const { androidBackingView } = androidNativeProps(android);
@@ -142,14 +158,21 @@ export const warnBackingViewAtMount = ({
 /**
  * Warns, in development on Android, about a change of these props that the
  * native view ignores: the backing view is created from them when the canvas
- * mounts (see SkiaView.java, whose setters these rules mirror).
+ * mounts (see SkiaView.java, whose setters these rules mirror). A change of
+ * `static`, which iOS also reads at mount, is warned about on iOS too.
  */
 export const warnBackingViewChange = (
   mount: BackingViewProps,
   prev: BackingViewProps,
   next: BackingViewProps
 ) => {
-  if (!__DEV__ || Platform.OS !== "android") {
+  if (!__DEV__ || Platform.OS === "web") {
+    return;
+  }
+  if (!!prev.static !== !!next.static) {
+    warnIgnoredChange("static");
+  }
+  if (Platform.OS !== "android" || mount.static) {
     return;
   }
   // Read as the native side receives them, so these rules see what its
