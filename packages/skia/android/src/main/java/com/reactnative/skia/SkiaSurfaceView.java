@@ -83,9 +83,11 @@ public class SkiaSurfaceView extends SurfaceView implements SurfaceHolder.Callba
     }
 
     // The format drives the compositor's opaque flag for this layer. It can
-    // change on a live surface: SurfaceView reports it through surfaceChanged.
+    // change on a live surface: SurfaceHolder.setFormat replaces the surface
+    // before it returns (SurfaceView.updateSurface), which the gate keeps
+    // showing its last frame through.
     public void setOpaque(boolean opaque) {
-        getHolder().setFormat(opaque ? PixelFormat.OPAQUE : PixelFormat.TRANSLUCENT);
+        mDrawGate.changeFormat(opaque ? PixelFormat.OPAQUE : PixelFormat.TRANSLUCENT, getHolder()::setFormat);
     }
 
     // The sublayer the surface is composited at, relative to the window: above
@@ -159,13 +161,17 @@ public class SkiaSurfaceView extends SurfaceView implements SurfaceHolder.Callba
         releaseSurface();
     }
 
-    /** A frame was presented into the surface. Main thread. */
-    void onFirstFramePresented() {
-        mDrawGate.onFirstFramePresented();
+    /** See FirstFrameDrawGate.currentSurface. Any thread. */
+    int currentSurface() {
+        return mDrawGate.currentSurface();
+    }
+
+    /** A first frame was presented into the surface currentSurface() named. Main thread. */
+    void onFirstFramePresented(int surface) {
+        mDrawGate.onFirstFramePresented(surface);
     }
 
     private void releaseSurface() {
-        mDrawGate.onSurfaceReleased();
-        mHandOver.onSurfaceReleased();
+        mDrawGate.onSurfaceReleased(mHandOver::onSurfaceReleased);
     }
 }
