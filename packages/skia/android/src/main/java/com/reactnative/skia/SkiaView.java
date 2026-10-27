@@ -135,8 +135,8 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
         mProps.setHighBitDepth(value);
     }
 
-    // RNLog writes the warning to logcat and, in development, to the JS
-    // console and LogBox; it names the view, as React Native's own views do.
+    // RNLog writes the warning to logcat and, in development, to LogBox; it
+    // names the view, as React Native's own views do.
     private void warn(String message) {
         RNLog.w((ReactContext) getContext(), TAG + ": " + message);
     }
