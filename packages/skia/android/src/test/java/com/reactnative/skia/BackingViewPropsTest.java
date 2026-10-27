@@ -97,6 +97,64 @@ public class BackingViewPropsTest {
     }
 
     @Test
+    public void aLaterHighBitDepthOnAMountedSurfaceViewIsIgnoredUntilItComesBack() {
+        BackingViewProps props = propsOn(34);
+        props.setBackingView("SurfaceView");
+        mountInAWindow(props);
+        props.setHighBitDepth(true);
+        props.setHighBitDepth(false);
+        assertEquals(Arrays.asList(BackingViewWarnings.ignoredChange("highBitDepth")), mWarnings);
+        assertFalse(props.surfaceHighBitDepth());
+    }
+
+    @Test
+    public void anotherViewMountedWithHighBitDepthSaysNothingWhenItIsTurnedOff() {
+        BackingViewProps props = propsOn(34);
+        props.setBackingView("TextureView");
+        props.setHighBitDepth(true);
+        mountInAWindow(props);
+        props.setHighBitDepth(false);
+        assertEquals(Arrays.asList(), mWarnings);
+    }
+
+    @Test
+    public void anotherViewMountedWithAZOrderSaysNothingWhenItIsTurnedOff() {
+        BackingViewProps props = propsOn(34);
+        props.setBackingView("TextureView");
+        props.setZOrderOnTop(true);
+        props.setZOrderMediaOverlay(true);
+        mountInAWindow(props);
+        props.setZOrderOnTop(false);
+        props.setZOrderMediaOverlay(false);
+        assertEquals(Arrays.asList(), mWarnings);
+        assertFalse(props.zOrderOnTop());
+        assertFalse(props.zOrderMediaOverlay());
+    }
+
+    @Test
+    public void onAndroid13ZOrderOnTopFollowsTheMediaOverlayTheSurfaceHas() {
+        BackingViewProps props = propsOn(33);
+        props.setBackingView("SurfaceView");
+        mountInAWindow(props);
+        props.setZOrderMediaOverlay(true);
+        props.setZOrderOnTop(true);
+        assertEquals(Arrays.asList(BackingViewWarnings.ignoredChange("android.zOrderMediaOverlay")), mWarnings);
+        assertFalse(props.zOrderMediaOverlay());
+        assertTrue(props.zOrderOnTop());
+    }
+
+    @Test
+    public void aCanvasMountedWithoutTheBackingViewPropHasTheDefaultView() {
+        BackingViewProps props = propsOn(34);
+        mountInAWindow(props);
+        assertEquals(BackingViewKind.TEXTURE_VIEW, props.kind());
+        props.setBackingView("SurfaceView");
+        props.setBackingView("TextureView");
+        props.setBackingView(null);
+        assertEquals(Arrays.asList(BackingViewWarnings.ignoredChange("android.backingView")), mWarnings);
+    }
+
+    @Test
     public void aViewNeverInAWindowSaysNothing() {
         BackingViewProps props = propsOn(34);
         props.setBackingView("HardwareBufferView");

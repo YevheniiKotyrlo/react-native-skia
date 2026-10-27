@@ -4,7 +4,6 @@ import androidx.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Objects;
 
 /**
  * The backing-view props of a SkiaView: as React last sent them, and what the
@@ -26,13 +25,15 @@ final class BackingViewProps {
         void warn(String message);
     }
 
+    // The spec's default (SkiaViewNativeComponent), for which Fabric hands null or nothing.
+    private static final String DEFAULT_BACKING_VIEW = "TextureView";
+
     private final int mSdk;
     private final int mTargetSdk;
     private final Reporter mReporter;
 
     // As React last sent them.
-    @Nullable
-    private String mBackingView = null;
+    private String mBackingView = DEFAULT_BACKING_VIEW;
     private boolean mOpaque = false;
     private boolean mZOrderOnTop = false;
     private boolean mZOrderMediaOverlay = false;
@@ -59,11 +60,12 @@ final class BackingViewProps {
     }
 
     void setBackingView(@Nullable String value) {
-        if (Objects.equals(value, mBackingView)) {
+        String backingView = value != null ? value : DEFAULT_BACKING_VIEW;
+        if (backingView.equals(mBackingView)) {
             return;
         }
-        mBackingView = value;
-        if (mKind != null && !Objects.equals(value, mMountedBackingView)) {
+        mBackingView = backingView;
+        if (mKind != null && !backingView.equals(mMountedBackingView)) {
             warn(BackingViewWarnings.ignoredChange("android.backingView"));
         }
     }
