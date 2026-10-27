@@ -47,7 +47,7 @@ public class SkiaSurfaceView extends SurfaceView implements SurfaceHolder.Callba
     // before it returns (SurfaceView.updateSurface), which the gate keeps
     // showing its last frame through.
     public void setOpaque(boolean opaque) {
-        mDrawGate.changeFormat(() -> getHolder().setFormat(opaque ? PixelFormat.OPAQUE : PixelFormat.TRANSLUCENT));
+        mDrawGate.changeFormat(opaque ? PixelFormat.OPAQUE : PixelFormat.TRANSLUCENT, getHolder()::setFormat);
     }
 
     // The sublayer the surface is composited at, relative to the window: above

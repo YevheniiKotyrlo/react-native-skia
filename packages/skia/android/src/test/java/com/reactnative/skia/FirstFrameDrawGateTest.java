@@ -4,6 +4,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
+import android.graphics.PixelFormat;
 import android.os.Build;
 
 import java.util.ArrayList;
@@ -48,15 +49,26 @@ public class FirstFrameDrawGateTest {
     private final List<String> mReported = new ArrayList<>();
     private final RecordingHost mHost = new RecordingHost();
     private final FirstFrameDrawGate mGate = new FirstFrameDrawGate(mHost, Build.VERSION_CODES.TIRAMISU);
+    private int mFormat = PixelFormat.OPAQUE;
 
     private Runnable draw(String name) {
         return () -> mReported.add(name);
     }
 
+    // Each call asks for the other format, so SurfaceView runs replacement.
+    private void changeFormat(FirstFrameDrawGate gate, Runnable replacement) {
+        mFormat = mFormat == PixelFormat.OPAQUE ? PixelFormat.TRANSLUCENT : PixelFormat.OPAQUE;
+        gate.changeFormat(mFormat, format -> replacement.run());
+    }
+
     private void replaceSurfaceInPlace() {
-        mGate.changeFormat(() -> {
-            mGate.onSurfaceReleased(NO_NATIVE_WORK);
-            mGate.onSurfaceCreated();
+        replaceSurfaceInPlace(mGate);
+    }
+
+    private void replaceSurfaceInPlace(FirstFrameDrawGate gate) {
+        changeFormat(gate, () -> {
+            gate.onSurfaceReleased(NO_NATIVE_WORK);
+            gate.onSurfaceCreated();
         });
     }
 
@@ -307,8 +319,93 @@ public class FirstFrameDrawGateTest {
     public void aSurfaceCreatedOutsideAFormatChangeOpensNoHoleBeforeItsFirstFrame() {
         mGate.onSurfaceCreated();
         mGate.onFirstFramePresented(mGate.currentSurface());
-        mGate.changeFormat(() -> mGate.onSurfaceReleased(NO_NATIVE_WORK));
+        changeFormat(mGate, () -> mGate.onSurfaceReleased(NO_NATIVE_WORK));
         mGate.onSurfaceCreated();
         assertFalse(mGate.hasFrame());
+    }
+
+    @Test
+    public void beforeAndroid12AFormatChangeWhoseFirstFrameMissesTheDeadlineClosesTheHole() {
+        FirstFrameDrawGate gate = new FirstFrameDrawGate(mHost, Build.VERSION_CODES.R);
+        gate.onSurfaceCreated();
+        gate.onFirstFramePresented(gate.currentSurface());
+        replaceSurfaceInPlace(gate);
+        gate.onRedrawNeeded(draw("new format"));
+
+        mHost.elapse();
+        assertEquals(Arrays.asList("new format"), mReported);
+        assertFalse(gate.hasFrame());
+
+        gate.onFirstFramePresented(gate.currentSurface());
+        assertTrue(gate.hasFrame());
+    }
+
+    @Test
+    public void fromAndroid12AFormatChangeKeepsTheHoleOpenPastTheDeadline() {
+        FirstFrameDrawGate gate = new FirstFrameDrawGate(mHost, Build.VERSION_CODES.S);
+        gate.onSurfaceCreated();
+        gate.onFirstFramePresented(gate.currentSurface());
+        replaceSurfaceInPlace(gate);
+        gate.onRedrawNeeded(draw("new format"));
+
+        mHost.elapse();
+        assertEquals(Arrays.asList("new format"), mReported);
+        assertTrue(gate.hasFrame());
+    }
+
+    @Test
+    public void beforeAndroid12ASecondFormatChangeReportsTheHeldDrawBeforeReplacingTheSurface() {
+        FirstFrameDrawGate gate = new FirstFrameDrawGate(mHost, Build.VERSION_CODES.R);
+        gate.onSurfaceCreated();
+        gate.onFirstFramePresented(gate.currentSurface());
+        replaceSurfaceInPlace(gate);
+        gate.onRedrawNeeded(draw("first new format"));
+        List<String> reportedBeforeTheReplacement = new ArrayList<>();
+
+        changeFormat(gate, () -> {
+            reportedBeforeTheReplacement.addAll(mReported);
+            gate.onSurfaceReleased(NO_NATIVE_WORK);
+            gate.onSurfaceCreated();
+        });
+
+        assertEquals(Arrays.asList("first new format"), reportedBeforeTheReplacement);
+        assertFalse(gate.hasFrame());
+
+        gate.onFirstFramePresented(gate.currentSurface());
+        assertTrue(gate.hasFrame());
+    }
+
+    @Test
+    public void fromAndroid12ASecondFormatChangeKeepsTheHoleOpenOverTheLastFrame() {
+        FirstFrameDrawGate gate = new FirstFrameDrawGate(mHost, Build.VERSION_CODES.S);
+        gate.onSurfaceCreated();
+        gate.onFirstFramePresented(gate.currentSurface());
+        replaceSurfaceInPlace(gate);
+        gate.onRedrawNeeded(draw("first new format"));
+        List<String> reportedBeforeTheReplacement = new ArrayList<>();
+
+        changeFormat(gate, () -> {
+            reportedBeforeTheReplacement.addAll(mReported);
+            gate.onSurfaceReleased(NO_NATIVE_WORK);
+            gate.onSurfaceCreated();
+        });
+
+        assertEquals(Arrays.asList(), reportedBeforeTheReplacement);
+        assertEquals(Arrays.asList("first new format"), mReported);
+        assertTrue(gate.hasFrame());
+    }
+
+    @Test
+    public void theFormatAskedForLastReplacesNothing() {
+        FirstFrameDrawGate gate = new FirstFrameDrawGate(mHost, Build.VERSION_CODES.R);
+        List<Integer> asked = new ArrayList<>();
+        gate.changeFormat(PixelFormat.TRANSLUCENT, asked::add);
+        gate.onSurfaceCreated();
+        gate.onRedrawNeeded(draw("held"));
+
+        gate.changeFormat(PixelFormat.TRANSLUCENT, asked::add);
+
+        assertEquals(Arrays.asList(PixelFormat.TRANSLUCENT), asked);
+        assertEquals(Arrays.asList(), mReported);
     }
 }

@@ -1,8 +1,10 @@
 package com.reactnative.skia;
 
+import android.graphics.PixelFormat;
 import android.os.Build;
 
 import java.util.ArrayList;
+import java.util.function.IntConsumer;
 
 /**
  * Holds a SurfaceView's draw reports, and its hole, until a frame is
@@ -23,10 +25,14 @@ import java.util.ArrayList;
  * A change of the surface's format replaces the surface while its last frame
  * stays on screen: from Android 12 SurfaceView keeps the layer, which shows
  * the old buffers until new ones replace them, and before it SurfaceView
- * removes the old layer only once the new surface's draw is reported. So the
- * hole stays open through a surface replaced by changeFormat(), and the new
- * surface's draw report still waits for its own first frame. Main thread, but
- * for currentSurface().
+ * keeps the old layer until the new surface's draw is reported. So the hole
+ * stays open through a surface replaced by changeFormat(), and the new
+ * surface's draw report still waits for its own first frame. Before Android
+ * 12 a draw reported ahead of that frame removes the old layer, so the hole
+ * closes until the frame lands; and SurfaceView keeps one old layer, so a
+ * format change reports the draws still held before it replaces the surface
+ * again, which would otherwise leave the layer holding the last frame on
+ * screen. Main thread, but for currentSurface().
  */
 final class FirstFrameDrawGate {
     /**
@@ -53,9 +59,11 @@ final class FirstFrameDrawGate {
 
     private final Host mHost;
     private final boolean mWindowWaitBoundedByPlatform;
+    private final boolean mDrawReportRemovesReplacedLayer;
     private final Runnable mFirstFrameDeadline = this::onFirstFrameDeadline;
     private boolean mFramePresented = false;
     private boolean mFrameShown = false;
+    private int mFormat = PixelFormat.UNKNOWN;
     private boolean mChangingFormat = false;
     private boolean mDeadlinePosted = false;
     // The surfaces released so far: written on the main thread, read on the
@@ -66,6 +74,7 @@ final class FirstFrameDrawGate {
     FirstFrameDrawGate(Host host, int sdkInt) {
         mHost = host;
         mWindowWaitBoundedByPlatform = sdkInt >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE;
+        mDrawReportRemovesReplacedLayer = sdkInt < Build.VERSION_CODES.S;
     }
 
     /** Whether the surface's layer shows a frame: the view opens its hole only then. */
@@ -74,13 +83,20 @@ final class FirstFrameDrawGate {
     }
 
     /**
-     * Runs setFormat, which changes the surface's format: SurfaceView replaces
-     * the surface inside it, and the replaced one's frame stays shown.
+     * Asks setFormat for format unless it was asked for last: SurfaceView
+     * replaces the surface inside it, and the replaced one's frame stays shown.
      */
-    void changeFormat(Runnable setFormat) {
+    void changeFormat(int format, IntConsumer setFormat) {
+        if (format == mFormat) {
+            return;
+        }
+        mFormat = format;
+        if (mDrawReportRemovesReplacedLayer) {
+            reportPendingDraws();
+        }
         mChangingFormat = true;
         try {
-            setFormat.run();
+            setFormat.accept(format);
         } finally {
             mChangingFormat = false;
         }
@@ -174,6 +190,9 @@ final class FirstFrameDrawGate {
     private void reportPendingDraws() {
         if (mPendingDrawsFinished.isEmpty()) {
             return;
+        }
+        if (mDrawReportRemovesReplacedLayer && !mFramePresented) {
+            setFrameShown(false);
         }
         ArrayList<Runnable> pending = new ArrayList<>(mPendingDrawsFinished);
         mPendingDrawsFinished.clear();
