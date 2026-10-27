@@ -6,6 +6,8 @@ import android.graphics.Canvas;
 import android.graphics.PixelFormat;
 import android.graphics.Region;
 import android.os.Build;
+import android.view.AttachedSurfaceControl;
+import android.view.SurfaceControl;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import androidx.annotation.NonNull;
@@ -15,6 +17,7 @@ import androidx.annotation.Nullable;
 public class SkiaSurfaceView extends SurfaceView implements SurfaceHolder.Callback2 {
 
     SkiaViewAPI mApi;
+    private boolean mOnTop = false;
     private final FirstFrameDrawGate mDrawGate = new FirstFrameDrawGate(new FirstFrameDrawGate.Host() {
         @Override
         public void postDelayed(Runnable action, long delayMillis) {
@@ -29,6 +32,11 @@ public class SkiaSurfaceView extends SurfaceView implements SurfaceHolder.Callba
         @Override
         public void invalidate() {
             SkiaSurfaceView.this.invalidate();
+        }
+
+        @Override
+        public boolean setLayerShown(boolean shown) {
+            return SkiaSurfaceView.this.setLayerShown(shown);
         }
     }, Build.VERSION.SDK_INT);
 
@@ -56,6 +64,7 @@ public class SkiaSurfaceView extends SurfaceView implements SurfaceHolder.Callba
     // applies a changed request with the window's next frame (its pre-draw
     // listener runs updateSurface()), which invalidate() schedules.
     public void setZOrder(boolean onTop, boolean mediaOverlay) {
+        mOnTop = onTop;
         setZOrderOnTop(onTop);
         if (!onTop) {
             setZOrderMediaOverlay(mediaOverlay);
@@ -66,9 +75,33 @@ public class SkiaSurfaceView extends SurfaceView implements SurfaceHolder.Callba
     // SurfaceView skips draw() and punches its hole in dispatchDraw.
     @Override
     protected void dispatchDraw(@NonNull Canvas canvas) {
+        mDrawGate.onWindowFrameDrawn();
         if (mDrawGate.hasFrame()) {
             super.dispatchDraw(canvas);
         }
+    }
+
+    // The layer is SurfaceView's own. SurfaceView sets its alpha only for a
+    // layer above the window, and from Android 14 on a z-order change, so a
+    // layer hidden below the window stays hidden until it is shown.
+    private boolean setLayerShown(boolean shown) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || (!shown && mOnTop)) {
+            return false;
+        }
+        SurfaceControl layer = getSurfaceControl();
+        if (layer == null) {
+            return false;
+        }
+        SurfaceControl.Transaction transaction =
+                new SurfaceControl.Transaction().setAlpha(layer, shown ? 1f : 0f);
+        AttachedSurfaceControl window = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+                ? getRootSurfaceControl() : null;
+        if (window != null) {
+            window.applyTransactionOnDraw(transaction);
+        } else {
+            transaction.apply();
+        }
+        return true;
     }
 
     // SurfaceView adds its bounds to the window's transparent region once its

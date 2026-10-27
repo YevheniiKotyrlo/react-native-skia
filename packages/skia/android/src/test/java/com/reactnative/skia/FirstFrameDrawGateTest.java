@@ -16,7 +16,9 @@ public class FirstFrameDrawGateTest {
     private static final class RecordingHost implements FirstFrameDrawGate.Host {
         final List<Runnable> posted = new ArrayList<>();
         final List<Long> delays = new ArrayList<>();
+        final List<String> events = new ArrayList<>();
         int invalidations = 0;
+        boolean layerAboveWindow = false;
 
         @Override
         public void postDelayed(Runnable action, long delayMillis) {
@@ -32,6 +34,19 @@ public class FirstFrameDrawGateTest {
         @Override
         public void invalidate() {
             invalidations++;
+            events.add("invalidate");
+        }
+
+        @Override
+        public boolean setLayerShown(boolean shown) {
+            events.add(shown ? "show layer" : "hide layer");
+            return !layerAboveWindow;
+        }
+
+        List<String> layerChanges() {
+            List<String> changes = new ArrayList<>(events);
+            changes.removeIf("invalidate"::equals);
+            return changes;
         }
 
         void elapse() {
@@ -233,5 +248,84 @@ public class FirstFrameDrawGateTest {
         mGate.onFirstFramePresented(mGate.currentSurface());
         assertTrue(mGate.hasFrame());
         assertEquals(3, mHost.invalidations);
+    }
+
+    @Test
+    public void fromAndroid13TheLayerShowsWithTheWindowFrameThatOpensTheHole() {
+        mGate.onSurfaceCreated();
+        assertEquals(Arrays.asList("hide layer"), mHost.events);
+
+        mGate.onFirstFramePresented(mGate.currentSurface());
+        assertEquals(Arrays.asList("hide layer", "show layer", "invalidate"), mHost.events);
+
+        mGate.onWindowFrameDrawn();
+        assertEquals(Arrays.asList("hide layer", "show layer"), mHost.layerChanges());
+    }
+
+    @Test
+    public void beforeAndroid13TheLayerShowsAsTheWindowFrameThatOpensTheHoleIsDrawn() {
+        FirstFrameDrawGate gate = new FirstFrameDrawGate(mHost, Build.VERSION_CODES.S_V2);
+        gate.onSurfaceCreated();
+        gate.onWindowFrameDrawn();
+        gate.onFirstFramePresented(gate.currentSurface());
+        assertEquals(Arrays.asList("hide layer", "invalidate"), mHost.events);
+
+        gate.onWindowFrameDrawn();
+        assertEquals(Arrays.asList("hide layer", "invalidate", "show layer"), mHost.events);
+    }
+
+    @Test
+    public void aLayerThatStaysHiddenThroughTheDeadlineShowsWithTheFirstFrame() {
+        mGate.onSurfaceCreated();
+        mGate.onRedrawNeeded(draw("held"));
+        mHost.elapse();
+        assertEquals(Arrays.asList("hide layer"), mHost.layerChanges());
+
+        mGate.onFirstFramePresented(mGate.currentSurface());
+        assertEquals(Arrays.asList("hide layer", "show layer"), mHost.layerChanges());
+    }
+
+    @Test
+    public void aFirstFrameOfAReleasedSurfaceLeavesTheNextLayerHidden() {
+        mGate.onSurfaceCreated();
+        int released = mGate.currentSurface();
+        mGate.onSurfaceReleased();
+        mGate.onSurfaceCreated();
+
+        mGate.onFirstFramePresented(released);
+        mGate.onWindowFrameDrawn();
+        assertEquals(Arrays.asList("hide layer", "hide layer"), mHost.layerChanges());
+    }
+
+    @Test
+    public void eachSurfaceHidesItsLayerUntilItsOwnFirstFrame() {
+        mGate.onSurfaceCreated();
+        mGate.onFirstFramePresented(mGate.currentSurface());
+        mGate.onSurfaceReleased();
+        mGate.onSurfaceCreated();
+        assertEquals(Arrays.asList("hide layer", "show layer", "hide layer"), mHost.layerChanges());
+
+        mGate.onFirstFramePresented(mGate.currentSurface());
+        assertEquals(Arrays.asList("hide layer", "show layer", "hide layer", "show layer"),
+                mHost.layerChanges());
+    }
+
+    @Test
+    public void theLayerIsShownOnce() {
+        mGate.onSurfaceCreated();
+        mGate.onFirstFramePresented(mGate.currentSurface());
+        mGate.onWindowFrameDrawn();
+        mGate.onFirstFramePresented(mGate.currentSurface());
+        mGate.onWindowFrameDrawn();
+        assertEquals(Arrays.asList("hide layer", "show layer"), mHost.layerChanges());
+    }
+
+    @Test
+    public void aLayerTheViewDidNotHideIsNeverShown() {
+        mHost.layerAboveWindow = true;
+        mGate.onSurfaceCreated();
+        mGate.onFirstFramePresented(mGate.currentSurface());
+        mGate.onWindowFrameDrawn();
+        assertEquals(Arrays.asList("hide layer"), mHost.layerChanges());
     }
 }

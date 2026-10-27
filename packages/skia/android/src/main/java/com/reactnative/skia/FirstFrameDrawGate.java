@@ -18,7 +18,17 @@ import java.util.ArrayList;
  * the window reports what is held, because Android 13 settles a SurfaceView's
  * pending draw only through that report. A first frame is reported for the
  * surface it went into, and one reported for a surface released since opens
- * nothing. Main thread, but for currentSurface().
+ * nothing.
+ *
+ * A layer below the window shows through every transparent region of the
+ * window, another SurfaceView's hole among them, so while its own hole is
+ * closed the layer is hidden, from Android 10, where SurfaceView exposes it
+ * (getSurfaceControl). From Android 13 it is shown with the window frame that
+ * opens the hole (AttachedSurfaceControl.applyTransactionOnDraw). Before it,
+ * which has no public way to change a layer with the window's frame, it is
+ * shown as that frame is drawn, ahead of the window's buffer: it can show
+ * through another hole a frame early, and never leaves its own hole empty.
+ * Main thread, but for currentSurface().
  */
 final class FirstFrameDrawGate {
     /**
@@ -41,13 +51,22 @@ final class FirstFrameDrawGate {
 
         /** hasFrame() changed: the view redraws, opening or closing its hole. */
         void invalidate();
+
+        /**
+         * Hides the surface's layer, or shows it: with the window's next
+         * frame from Android 13, at once before it. Returns false, changing
+         * nothing, for a layer above the window, which has no hole.
+         */
+        boolean setLayerShown(boolean shown);
     }
 
     private final Host mHost;
     private final boolean mWindowWaitBoundedByPlatform;
+    private final boolean mLayerShownWithWindowFrame;
     private final Runnable mFirstFrameDeadline = this::onFirstFrameDeadline;
     private boolean mFramePresented = false;
     private boolean mDeadlinePosted = false;
+    private boolean mLayerHidden = false;
     // The surfaces released so far: written on the main thread, read on the
     // thread that presents (see currentSurface).
     private volatile int mSurfacesReleased = 0;
@@ -56,6 +75,7 @@ final class FirstFrameDrawGate {
     FirstFrameDrawGate(Host host, int sdkInt) {
         mHost = host;
         mWindowWaitBoundedByPlatform = sdkInt >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE;
+        mLayerShownWithWindowFrame = sdkInt >= Build.VERSION_CODES.TIRAMISU;
     }
 
     /** Whether a frame has been presented into the current surface: the view opens its hole only then. */
@@ -66,6 +86,14 @@ final class FirstFrameDrawGate {
     /** A new surface: nothing has been presented into it yet. */
     void onSurfaceCreated() {
         setFramePresented(false);
+        mLayerHidden = mHost.setLayerShown(false);
+    }
+
+    /** The view draws itself into a window frame, which opens its hole once hasFrame(). */
+    void onWindowFrameDrawn() {
+        if (mFramePresented) {
+            showLayer();
+        }
     }
 
     /** The window asks to be told once the surface has drawn. */
@@ -97,6 +125,9 @@ final class FirstFrameDrawGate {
         if (surface != mSurfacesReleased) {
             return;
         }
+        if (mLayerShownWithWindowFrame) {
+            showLayer();
+        }
         setFramePresented(true);
         cancelDeadline();
         reportPendingDraws();
@@ -122,6 +153,13 @@ final class FirstFrameDrawGate {
     private void onFirstFrameDeadline() {
         mDeadlinePosted = false;
         reportPendingDraws();
+    }
+
+    private void showLayer() {
+        if (mLayerHidden) {
+            mLayerHidden = false;
+            mHost.setLayerShown(true);
+        }
     }
 
     private void setFramePresented(boolean framePresented) {
