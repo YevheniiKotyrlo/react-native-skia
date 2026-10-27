@@ -174,6 +174,14 @@ public:
    */
   bool canPresent();
 
+  /**
+   Installed by the platform view: called after each frame the window
+   presents, on the thread that presented it.
+   */
+  void setDidPresent(std::function<void()> didPresent) {
+    _didPresent = std::move(didPresent);
+  }
+
   // RNSkSurface -------------------------------------------------------------
 
   /** Width of the window, in pixels; 0 without a window. Any thread. */
@@ -283,6 +291,11 @@ private:
       _requestRedraw();
     }
   }
+  void didPresent() {
+    if (_didPresent) {
+      _didPresent();
+    }
+  }
 
   // Keeps the main thread (attach, resize, detach) and the thread the view
   // presents on apart; see the class comment.
@@ -327,6 +340,7 @@ private:
   std::function<void()> _requestRedraw;
   std::function<bool()> _canPresent;
   std::atomic<bool> _presentsHeld{false};
+  std::function<void()> _didPresent;
 };
 
 } // namespace RNSkia
