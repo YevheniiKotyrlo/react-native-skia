@@ -6,6 +6,7 @@ import type { AndroidNativeProps } from "../views/android";
 
 export interface NativeProps extends ViewProps, Partial<AndroidNativeProps> {
   highBitDepth?: boolean;
+  staticPresentation?: boolean;
   nativeID: string;
 }
 
@@ -14,6 +15,7 @@ const SkiaViewNativeComponent = ({
   onLayout,
   // Surface settings, never reach the DOM
   highBitDepth: _highBitDepth,
+  staticPresentation: _staticPresentation,
   androidBackingView: _androidBackingView,
   androidOpaque: _androidOpaque,
   androidZOrderOnTop: _androidZOrderOnTop,

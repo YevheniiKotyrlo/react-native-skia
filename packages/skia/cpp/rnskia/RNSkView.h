@@ -3,6 +3,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -19,6 +20,7 @@
 #include "RNSkRedrawRequest.h"
 #include "RNSkSurface.h"
 #include "RNSkWindowSurface.h"
+#include "RNSkWorker.h"
 #include "jsi/ViewProperty.h"
 #include "utils/RNSkLog.h"
 
@@ -45,7 +47,8 @@ namespace jsi = facebook::jsi;
  * surface once the platform view's surface can show a new frame (see
  * setFrameScheduler), on the thread the platform view presents on: the main
  * thread, or a thread of its own (an Android canvas presents on one shared by
- * every canvas, see setPresentThread).
+ * every canvas, see setPresentThread). A static canvas presents its frames
+ * as images, on the worker (see presentAsImages).
  *
  * Threading: the registry side (RNSkJsiViewApi) runs on the JS thread, except
  * applyUpdates() which a Reanimated mapper calls on the UI runtime; snapshots
@@ -216,8 +219,8 @@ public:
       }
       recordings.push_back(std::move(lastPresented));
     }
-    // Not scheduleFrame(): without a scheduler it redraws, which would fail
-    // again and recurse.
+    // The frame scheduler tries it again on the view's next frame; without
+    // one, it waits for the next recording or redraw (see setFrameScheduler).
     if ((!presentOrKeep(*target, targetInfo, std::move(recordings)).allDone ||
          _surface->hasHeldFrame()) &&
         _frameScheduler) {
@@ -269,7 +272,8 @@ public:
    thread. Without one, tasks are posted to the main thread, which the Apple
    views present on; an Android view always installs one (its platform
    context runs a task handed over on the main thread on the spot, see
-   JniPlatformContext). Installed once, before the view is bound to its id.
+   JniPlatformContext). Installed before the view is bound to its id: the
+   frame requests the view hands out then keep the runner they were given.
    */
   void setPresentThread(std::function<void(std::function<void()>)> run) {
     _runOnPresentThread = std::move(run);
@@ -310,12 +314,28 @@ public:
     _windowTakesLatestFrame = takesLatestFrame;
   }
 
+  /**
+   Presents the view's frames as images, for a static canvas: on the worker,
+   as soon as it gets to them, into the image presenter the platform view
+   attaches in place of a window (see RNSkWindowSurface::attachImagePresenter).
+   No window takes them, so they need neither the main thread nor the present
+   thread every window shares, which a screen of static canvases mounting at
+   once would hold up. Installed in place of the platform view's present
+   thread and frame scheduler, before the view is bound to its id.
+   */
+  void presentAsImages() {
+    setPresentThread([](std::function<void()> task) {
+      RNSkWorker::getInstance().post(std::move(task));
+    });
+    _frameScheduler = nullptr;
+  }
+
   /** Present thread: a recording is waiting. */
   void scheduleFrame() {
     if (_frameScheduler) {
       _frameScheduler(hasFrameForResizedWindow());
     } else {
-      redraw();
+      presentFrame(/* ticks= */ 0);
     }
   }
 
@@ -734,10 +754,20 @@ private:
       RNSkSurface &surface, const RNSkGraphiteTargetInfo &targetInfo,
       const std::shared_ptr<RNSkGraphiteRecording> &recording) {
     const auto &size = recording->getTarget();
-    RNSkOffscreenSurface intermediate(_platformContext, size.width, size.height,
-                                      size.useP3ColorSpace);
+    // DawnContext::MakeOffscreen throws for a texture or a recorder it cannot
+    // get, and a present never throws, the worker's for a static canvas
+    // included: the recording is consumed.
+    std::optional<RNSkOffscreenSurface> intermediate;
+    try {
+      intermediate.emplace(_platformContext, size.width, size.height,
+                           size.useP3ColorSpace);
+    } catch (const std::exception &error) {
+      RNSkLogger::logToConsole("SkiaView: skipping a %dx%d recording: %s",
+                               size.width, size.height, error.what());
+      return TexturePresent::kConsumed;
+    }
     RNSkGraphiteTargetInfo info;
-    if (!intermediate.getTargetInfo(&info) ||
+    if (!intermediate->getTargetInfo(&info) ||
         !recording->isCompatibleWith(info)) {
       // No texture of that size and format: the frame is consumed.
       RNSkLogger::logToConsole("SkiaView: skipping a %dx%d recording, the "
@@ -746,8 +776,8 @@ private:
                                surface.getHeight());
       return TexturePresent::kConsumed;
     }
-    auto image = intermediate.presentRecordings(info, {recording->get()})
-                     ? intermediate.makeImage()
+    auto image = intermediate->presentRecordings(info, {recording->get()})
+                     ? intermediate->makeImage()
                      : nullptr;
     if (image == nullptr) {
       RNSkLogger::logToConsole("SkiaView: skipping a %dx%d recording, it "

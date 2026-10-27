@@ -93,6 +93,10 @@ final class FrameScheduler {
                     present(kind, 0);
                 }
             }
+            // A static canvas has no frame scheduler: its frames are presented
+            // on the worker as they are queued (see RNSkView::presentAsImages).
+            case IMAGE -> {
+            }
         }
     }
 

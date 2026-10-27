@@ -258,3 +258,53 @@ describe("warnBackingViewChange", () => {
     expect(warn.mock.calls[0][0]).toContain("a highBitDepth canvas is opaque");
   });
 });
+
+describe("the warnings about a static canvas", () => {
+  const warnings = () => warn.mock.calls.map(([message]) => message);
+
+  it.each(["android", "ios"])(
+    "say on %s that a static canvas ignores highBitDepth",
+    (os) => {
+      Platform.OS = os;
+      warnBackingViewAtMount({ static: true, highBitDepth: true });
+      expect(warnings()).toEqual([
+        "Ignoring highBitDepth: a static canvas shows its frames as 8-bit images.",
+      ]);
+    }
+  );
+
+  it("say nothing of the backing view a static canvas does not have", () => {
+    warnBackingViewAtMount({
+      static: true,
+      android: { backingView: "HardwareBufferView" },
+    });
+    expect(warnings()).toEqual([]);
+  });
+
+  it.each(["android", "ios"])(
+    "say on %s that a change of static is ignored once mounted",
+    (os) => {
+      Platform.OS = os;
+      warnBackingViewChange({}, {}, { static: true });
+      expect(warnings()).toEqual([
+        "Ignoring a change of static on a mounted canvas: the backing view is " +
+          "chosen when the canvas mounts. Remount the canvas (give it a new " +
+          "key) to change it.",
+      ]);
+    }
+  );
+
+  it("say nothing on the Web, where static has no effect", () => {
+    Platform.OS = "web";
+    warnBackingViewAtMount({ static: true, highBitDepth: true });
+    warnBackingViewChange({}, {}, { static: true });
+    expect(warnings()).toEqual([]);
+  });
+
+  it("leave the backing view's own warnings to a canvas that is not static", () => {
+    warnBackingViewAtMount({ highBitDepth: true });
+    expect(warnings()).toEqual([
+      'highBitDepth needs a SurfaceView on Android (android.backingView: "SurfaceView"), the canvas keeps the 8-bit format.',
+    ]);
+  });
+});
