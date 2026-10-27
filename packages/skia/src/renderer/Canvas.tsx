@@ -74,7 +74,7 @@ export interface CanvasProps extends ViewProps {
    * Android-only rendering options: the native view behind the canvas and its
    * options, see {@link AndroidCanvasProps}. The view is created when the
    * canvas mounts and kept: a change of `backingView` is ignored, with a
-   * warning in development; remount the canvas, with a `key`, to change it.
+   * warning; remount the canvas, with a `key`, to change it.
    * Ignored on iOS and web.
    */
   android?: AndroidCanvasProps;

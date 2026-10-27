@@ -66,4 +66,33 @@ enum BackingViewKind {
     static boolean zOrderMediaOverlayChangesInPlace(int sdk) {
         return sdk >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE;
     }
+
+    /** What a mounted canvas does with a changed z-order prop. */
+    enum ZOrderChange {
+        /** The SurfaceView moves its live surface. */
+        TAKEN,
+        /** The view already has the z-order asked for. */
+        UNCHANGED,
+        /** The SurfaceView keeps the z-order its surface was created with, and says so. */
+        IGNORED_ONCE_MOUNTED,
+        /** Only a SurfaceView has a z-order of its own: a request for one is ignored, and said so. */
+        IGNORED_BY_THE_VIEW,
+    }
+
+    /**
+     * What a mounted canvas of the given kind does with a z-order prop changed
+     * to value from current, the one its view has (a view other than a
+     * SurfaceView has none), where changesInPlace says whether this Android
+     * release moves a live surface for that prop.
+     */
+    static ZOrderChange decideZOrderChange(BackingViewKind kind, boolean value, boolean current,
+            boolean changesInPlace) {
+        if (value == current) {
+            return ZOrderChange.UNCHANGED;
+        }
+        return switch (kind) {
+            case SURFACE_VIEW -> changesInPlace ? ZOrderChange.TAKEN : ZOrderChange.IGNORED_ONCE_MOUNTED;
+            case TEXTURE_VIEW -> ZOrderChange.IGNORED_BY_THE_VIEW;
+        };
+    }
 }

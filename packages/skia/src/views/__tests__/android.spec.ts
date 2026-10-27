@@ -7,16 +7,15 @@ import {
 } from "../android";
 
 jest.mock("../../Platform", () => ({
-  Platform: { OS: "android", Version: 35 },
+  Platform: { OS: "android" },
 }));
 
 const { Platform } = jest.requireMock<{
-  Platform: { OS: string; Version?: number };
+  Platform: { OS: string };
 }>("../../Platform");
 
 beforeEach(() => {
   Platform.OS = "android";
-  Platform.Version = 35;
 });
 
 // What a JavaScript caller can pass that TypeScript refuses.

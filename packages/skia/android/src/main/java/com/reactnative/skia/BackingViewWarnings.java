@@ -8,7 +8,7 @@ import java.util.List;
 /**
  * What SkiaView says about props it cannot honour: the options a mounting
  * canvas asks for that its backing view does not take, and a change it
- * ignores once mounted. SkiaView logs each one and hands it to the JS console.
+ * ignores once mounted. BackingViewProps decides when each one is said.
  */
 final class BackingViewWarnings {
     private BackingViewWarnings() {}
@@ -24,18 +24,33 @@ final class BackingViewWarnings {
         }
         if (kind != BackingViewKind.SURFACE_VIEW) {
             if (highBitDepth) {
-                warnings.add("highBitDepth needs a SurfaceView on Android (android.backingView: \"SurfaceView\"),"
-                        + " the canvas keeps the 8-bit format.");
+                warnings.add(highBitDepthOnlyOnASurfaceView());
             }
             if (zOrderOnTop || zOrderMediaOverlay) {
-                warnings.add("android.zOrderOnTop and android.zOrderMediaOverlay only apply to a SurfaceView"
-                        + " (android.backingView: \"SurfaceView\"), the canvas ignores them.");
+                warnings.add(zOrderOnlyOnASurfaceView());
             }
         } else if (highBitDepth && !opaque) {
-            warnings.add("Ignoring android.opaque: false, a highBitDepth canvas is opaque on Android"
-                    + " (the 10-bit format only has 2 bits of alpha).");
+            warnings.add(translucentHighBitDepth());
         }
         return warnings;
+    }
+
+    /** The warning for a highBitDepth a view other than a SurfaceView is asked for, which it ignores. */
+    static String highBitDepthOnlyOnASurfaceView() {
+        return "highBitDepth needs a SurfaceView on Android (android.backingView: \"SurfaceView\"),"
+                + " the canvas keeps the 8-bit format.";
+    }
+
+    /** The warning for opaque: false on a canvas with the 10-bit format, which stays opaque. */
+    static String translucentHighBitDepth() {
+        return "Ignoring android.opaque: false, a highBitDepth canvas is opaque on Android"
+                + " (the 10-bit format only has 2 bits of alpha).";
+    }
+
+    /** The warning for a z-order a view other than a SurfaceView is asked for, which it ignores. */
+    static String zOrderOnlyOnASurfaceView() {
+        return "android.zOrderOnTop and android.zOrderMediaOverlay only apply to a SurfaceView"
+                + " (android.backingView: \"SurfaceView\"), the canvas ignores them.";
     }
 
     /** The warning for a change of `prop` that a mounted canvas ignores. */

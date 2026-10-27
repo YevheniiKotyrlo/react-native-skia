@@ -39,25 +39,25 @@ export const resolveBackingView = (
 
 /**
  * The native props the `android` prop resolves to, on a canvas that mounted
- * with `mounted`: the native view keeps the view it mounted with, ignoring a
- * later `backingView` with a warning, so the opacity takes that view's
- * default — a `SurfaceView` is opaque unless asked otherwise, a `TextureView`
- * translucent unless asked otherwise, and a `HardwareBufferView` always
- * composites with alpha. The z-order options go to every view: a
- * `SurfaceView` takes them, and any other warns about them. The native view
- * adds the opacity of the 10-bit format it was created with (see
- * BackingViewKind.resolveOpaque()).
+ * with `mountedBackingView`: the native view keeps the view it mounted with,
+ * ignoring a later `backingView` with a warning, so the opacity takes that
+ * view's default — a `SurfaceView` is opaque unless asked otherwise, a
+ * `TextureView` translucent unless asked otherwise, and a
+ * `HardwareBufferView` always composites with alpha. The z-order options go
+ * to every view: a `SurfaceView` takes them, and any other warns about them.
+ * The native view adds the opacity of the 10-bit format it was created with
+ * (see BackingViewKind.resolveOpaque()).
  */
 export const androidNativeProps = (
   android: AndroidCanvasProps | undefined,
-  mounted: AndroidBackingView
+  mountedBackingView: AndroidBackingView
 ): AndroidNativeProps => {
   const requested = {
     androidBackingView: resolveBackingView(android),
     androidZOrderOnTop: !!android?.zOrderOnTop,
     androidZOrderMediaOverlay: !!android?.zOrderMediaOverlay,
   };
-  switch (mounted) {
+  switch (mountedBackingView) {
     case "SurfaceView":
       return { ...requested, androidOpaque: android?.opaque !== false };
     case "TextureView":

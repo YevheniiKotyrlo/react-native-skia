@@ -59,4 +59,32 @@ public class BackingViewKindTest {
         assertFalse(BackingViewKind.zOrderMediaOverlayChangesInPlace(33));
         assertTrue(BackingViewKind.zOrderMediaOverlayChangesInPlace(34));
     }
+
+    @Test
+    public void aMountedSurfaceViewTakesAZOrderChangeWhereItsReleaseMovesTheSurface() {
+        assertEquals(BackingViewKind.ZOrderChange.TAKEN,
+                BackingViewKind.decideZOrderChange(BackingViewKind.SURFACE_VIEW, true, false, true));
+        assertEquals(BackingViewKind.ZOrderChange.IGNORED_ONCE_MOUNTED,
+                BackingViewKind.decideZOrderChange(BackingViewKind.SURFACE_VIEW, true, false, false));
+        assertEquals(BackingViewKind.ZOrderChange.IGNORED_ONCE_MOUNTED,
+                BackingViewKind.decideZOrderChange(BackingViewKind.SURFACE_VIEW, false, true, false));
+    }
+
+    @Test
+    public void aZOrderTheViewHasIsUnchanged() {
+        for (BackingViewKind kind : BackingViewKind.values()) {
+            for (boolean changesInPlace : new boolean[] {false, true}) {
+                assertEquals(BackingViewKind.ZOrderChange.UNCHANGED,
+                        BackingViewKind.decideZOrderChange(kind, false, false, changesInPlace));
+            }
+        }
+        assertEquals(BackingViewKind.ZOrderChange.UNCHANGED,
+                BackingViewKind.decideZOrderChange(BackingViewKind.SURFACE_VIEW, true, true, false));
+    }
+
+    @Test
+    public void anotherMountedViewReportsAZOrderItIsAskedFor() {
+        assertEquals(BackingViewKind.ZOrderChange.IGNORED_BY_THE_VIEW,
+                BackingViewKind.decideZOrderChange(BackingViewKind.TEXTURE_VIEW, true, false, true));
+    }
 }

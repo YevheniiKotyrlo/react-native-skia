@@ -34,10 +34,10 @@ public class BackingViewWarningsTest {
     @Test
     public void theZOrderWarnsOnEveryViewButASurfaceView() {
         for (String backingView : Arrays.asList(null, "TextureView", "HardwareBufferView")) {
-            assertTrue(backingView, BackingViewWarnings.atMount(backingView, false, false, true, false).stream()
-                    .anyMatch(warning -> warning.startsWith("android.zOrderOnTop and android.zOrderMediaOverlay")));
-            assertTrue(backingView, BackingViewWarnings.atMount(backingView, false, false, false, true).stream()
-                    .anyMatch(warning -> warning.startsWith("android.zOrderOnTop and android.zOrderMediaOverlay")));
+            assertTrue(backingView, BackingViewWarnings.atMount(backingView, false, false, true, false)
+                    .contains(BackingViewWarnings.zOrderOnlyOnASurfaceView()));
+            assertTrue(backingView, BackingViewWarnings.atMount(backingView, false, false, false, true)
+                    .contains(BackingViewWarnings.zOrderOnlyOnASurfaceView()));
         }
     }
 

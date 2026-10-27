@@ -164,3 +164,26 @@ describe("Canvas ref size", () => {
     unmount();
   });
 });
+
+// The native view keeps the backing view the canvas mounted with and ignores
+// a later backingView, so the opacity keeps that view's default.
+describe("Canvas backing view", () => {
+  it("resolves the opacity for the view it mounted with", () => {
+    const { Canvas } = loadCanvas();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    act(() => {
+      root.render(<Canvas android={{ backingView: "SurfaceView" }} />);
+    });
+    act(() => {
+      root.render(<Canvas android={{ backingView: "TextureView" }} />);
+    });
+    expect(mockNativeView.props).toMatchObject({
+      androidBackingView: "TextureView",
+      androidOpaque: true,
+    });
+    act(() => root.unmount());
+    container.remove();
+  });
+});

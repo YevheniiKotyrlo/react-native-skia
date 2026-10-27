@@ -70,7 +70,7 @@ export interface AndroidHardwareBufferViewProps {
    * A plain view drawing each frame's `AHardwareBuffer` inline: composited
    * like a `TextureView`, without its extra copy (Android 10 and later, the
    * opt-in of React Native WebGPU). Not available in React Native Skia yet:
-   * the canvas uses a `TextureView`, with a warning in development. Always
+   * the canvas uses a `TextureView`, with a warning. Always
    * composites with alpha.
    */
   backingView: "HardwareBufferView";

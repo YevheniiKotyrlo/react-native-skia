@@ -59,11 +59,16 @@ const mountView = ({
       );
     });
   };
+  // useImperativeHandle hands the ref a new handle when its dependencies change.
+  const view = () => {
+    const handle = ref.current;
+    if (handle === null) {
+      throw new Error("SkiaGraphiteView did not attach its ref");
+    }
+    return handle;
+  };
   render(props);
-  const view = ref.current;
-  if (view === null) {
-    throw new Error("SkiaGraphiteView did not attach its ref");
-  }
+  view();
   return {
     view,
     rerender: render,
@@ -106,9 +111,9 @@ describe("SkiaGraphiteView on native", () => {
   it("sizes the context from the view's layout, not its transformed box", async () => {
     mockHost = createScaledHost();
     const { view, unmount } = mountView();
-    view.getContext();
+    view().getContext();
     expect(SkiaViewApi.makeGraphiteContext).toHaveBeenCalledWith(
-      view.getNativeId(),
+      view().getNativeId(),
       200,
       100,
       false
@@ -130,7 +135,7 @@ describe("SkiaGraphiteView on native", () => {
       const { view, unmount } = mountView({
         props: { highBitDepth: true, android },
       });
-      view.getContext();
+      view().getContext();
       expect(SkiaViewApi.makeGraphiteContext.mock.calls[0].at(-1)).toBe(
         highBitDepth
       );
@@ -148,7 +153,7 @@ describe("SkiaGraphiteView on native", () => {
         props: { highBitDepth, android },
       });
       rerender({ highBitDepth: !highBitDepth, android });
-      view.getContext();
+      view().getContext();
       expect(SkiaViewApi.makeGraphiteContext.mock.calls[0].at(-1)).toBe(
         highBitDepth
       );
@@ -197,13 +202,12 @@ describe("SkiaGraphiteView on native", () => {
   it("retires its context on unmount", async () => {
     mockHost = createScaledHost();
     const { view, unmount } = mountView();
-    view.getContext();
+    const nativeId = view().getNativeId();
+    view().getContext();
     expect(SkiaViewApi.destroyGraphiteContext).not.toHaveBeenCalled();
     await unmount();
     expect(SkiaViewApi.destroyGraphiteContext).toHaveBeenCalledTimes(1);
-    expect(SkiaViewApi.destroyGraphiteContext).toHaveBeenCalledWith(
-      view.getNativeId()
-    );
+    expect(SkiaViewApi.destroyGraphiteContext).toHaveBeenCalledWith(nativeId);
   });
 
   // StrictMode runs the unmount cleanup once right after mount and re-runs
@@ -213,8 +217,8 @@ describe("SkiaGraphiteView on native", () => {
   it("retires the same id under StrictMode's simulated unmount", async () => {
     mockHost = createScaledHost();
     const { view, unmount } = mountView({ strict: true });
-    const nativeId = view.getNativeId();
-    view.getContext();
+    const nativeId = view().getNativeId();
+    view().getContext();
     expect(SkiaViewApi.makeGraphiteContext).toHaveBeenLastCalledWith(
       nativeId,
       200,
