@@ -58,6 +58,8 @@ public class FirstFrameDrawGateTest {
         }
     }
 
+    private static final Runnable NO_NATIVE_WORK = () -> {};
+
     private final List<String> mReported = new ArrayList<>();
     private final RecordingHost mHost = new RecordingHost();
     private final FirstFrameDrawGate mGate = new FirstFrameDrawGate(mHost, Build.VERSION_CODES.TIRAMISU);
@@ -89,7 +91,7 @@ public class FirstFrameDrawGateTest {
     public void newSurfaceWaitsForItsOwnFirstFrame() {
         mGate.onSurfaceCreated();
         mGate.onFirstFramePresented(mGate.currentSurface());
-        mGate.onSurfaceReleased();
+        mGate.onSurfaceReleased(NO_NATIVE_WORK);
         mGate.onSurfaceCreated();
         mGate.onRedrawNeeded(draw("second surface"));
         assertEquals(Arrays.asList(), mReported);
@@ -102,7 +104,7 @@ public class FirstFrameDrawGateTest {
     public void aFirstFrameOfAReleasedSurfaceLeavesTheNextSurfaceWaiting() {
         mGate.onSurfaceCreated();
         int released = mGate.currentSurface();
-        mGate.onSurfaceReleased();
+        mGate.onSurfaceReleased(NO_NATIVE_WORK);
         mGate.onSurfaceCreated();
         mGate.onRedrawNeeded(draw("second surface"));
 
@@ -116,7 +118,7 @@ public class FirstFrameDrawGateTest {
         mGate.onSurfaceCreated();
         mGate.onRedrawNeeded(draw("a"));
         mGate.onRedrawNeeded(draw("b"));
-        mGate.onSurfaceReleased();
+        mGate.onSurfaceReleased(NO_NATIVE_WORK);
         assertEquals(Arrays.asList("a", "b"), mReported);
         assertEquals(0, mHost.posted.size());
     }
@@ -128,7 +130,7 @@ public class FirstFrameDrawGateTest {
         mGate.onDetachedFromWindow();
         assertEquals(Arrays.asList("held"), mReported);
 
-        mGate.onSurfaceReleased();
+        mGate.onSurfaceReleased(NO_NATIVE_WORK);
         mGate.onFirstFramePresented(mGate.currentSurface());
         mHost.elapse();
         assertEquals(Arrays.asList("held"), mReported);
@@ -140,7 +142,7 @@ public class FirstFrameDrawGateTest {
         mGate.onRedrawNeeded(draw("once"));
         mGate.onFirstFramePresented(mGate.currentSurface());
         mGate.onFirstFramePresented(mGate.currentSurface());
-        mGate.onSurfaceReleased();
+        mGate.onSurfaceReleased(NO_NATIVE_WORK);
         mHost.elapse();
         assertEquals(Arrays.asList("once"), mReported);
     }
@@ -239,7 +241,7 @@ public class FirstFrameDrawGateTest {
     public void aNewSurfaceKeepsTheHoleClosedUntilItsOwnFirstFrame() {
         mGate.onSurfaceCreated();
         mGate.onFirstFramePresented(mGate.currentSurface());
-        mGate.onSurfaceReleased();
+        mGate.onSurfaceReleased(NO_NATIVE_WORK);
         assertFalse(mGate.hasFrame());
 
         mGate.onSurfaceCreated();
@@ -251,20 +253,21 @@ public class FirstFrameDrawGateTest {
     }
 
     @Test
-    public void fromAndroid13TheLayerShowsWithTheWindowFrameThatOpensTheHole() {
-        mGate.onSurfaceCreated();
+    public void fromAndroid12TheLayerShowsWithTheWindowFrameThatOpensTheHole() {
+        FirstFrameDrawGate gate = new FirstFrameDrawGate(mHost, Build.VERSION_CODES.S);
+        gate.onSurfaceCreated();
         assertEquals(Arrays.asList("hide layer"), mHost.events);
 
-        mGate.onFirstFramePresented(mGate.currentSurface());
+        gate.onFirstFramePresented(gate.currentSurface());
         assertEquals(Arrays.asList("hide layer", "show layer", "invalidate"), mHost.events);
 
-        mGate.onWindowFrameDrawn();
+        gate.onWindowFrameDrawn();
         assertEquals(Arrays.asList("hide layer", "show layer"), mHost.layerChanges());
     }
 
     @Test
-    public void beforeAndroid13TheLayerShowsAsTheWindowFrameThatOpensTheHoleIsDrawn() {
-        FirstFrameDrawGate gate = new FirstFrameDrawGate(mHost, Build.VERSION_CODES.S_V2);
+    public void beforeAndroid12TheLayerShowsAsTheWindowFrameThatOpensTheHoleIsDrawn() {
+        FirstFrameDrawGate gate = new FirstFrameDrawGate(mHost, Build.VERSION_CODES.R);
         gate.onSurfaceCreated();
         gate.onWindowFrameDrawn();
         gate.onFirstFramePresented(gate.currentSurface());
@@ -289,7 +292,7 @@ public class FirstFrameDrawGateTest {
     public void aFirstFrameOfAReleasedSurfaceLeavesTheNextLayerHidden() {
         mGate.onSurfaceCreated();
         int released = mGate.currentSurface();
-        mGate.onSurfaceReleased();
+        mGate.onSurfaceReleased(NO_NATIVE_WORK);
         mGate.onSurfaceCreated();
 
         mGate.onFirstFramePresented(released);
@@ -301,7 +304,7 @@ public class FirstFrameDrawGateTest {
     public void eachSurfaceHidesItsLayerUntilItsOwnFirstFrame() {
         mGate.onSurfaceCreated();
         mGate.onFirstFramePresented(mGate.currentSurface());
-        mGate.onSurfaceReleased();
+        mGate.onSurfaceReleased(NO_NATIVE_WORK);
         mGate.onSurfaceCreated();
         assertEquals(Arrays.asList("hide layer", "show layer", "hide layer"), mHost.layerChanges());
 
@@ -327,5 +330,45 @@ public class FirstFrameDrawGateTest {
         mGate.onFirstFramePresented(mGate.currentSurface());
         mGate.onWindowFrameDrawn();
         assertEquals(Arrays.asList("hide layer"), mHost.layerChanges());
+    }
+
+    @Test
+    public void aSurfaceCountsAsReleasedOnlyOnceTheNativeSideLetGoOfIt() {
+        mGate.onSurfaceCreated();
+        int created = mGate.currentSurface();
+        int[] seenWhileReleasing = new int[1];
+
+        mGate.onSurfaceReleased(() -> seenWhileReleasing[0] = mGate.currentSurface());
+
+        assertEquals(created, seenWhileReleasing[0]);
+        assertEquals(created + 1, mGate.currentSurface());
+    }
+
+    @Test
+    public void aZOrderChangeBeforeTheFirstFrameHidesTheLayerAgain() {
+        mGate.onSurfaceCreated();
+        mGate.onZOrderApplied();
+        assertEquals(Arrays.asList("hide layer", "hide layer"), mHost.layerChanges());
+
+        mGate.onFirstFramePresented(mGate.currentSurface());
+        assertEquals(Arrays.asList("hide layer", "hide layer", "show layer"), mHost.layerChanges());
+    }
+
+    @Test
+    public void aZOrderChangeOnceTheHoleOpenedLeavesTheLayerShown() {
+        mGate.onSurfaceCreated();
+        mGate.onFirstFramePresented(mGate.currentSurface());
+        mGate.onZOrderApplied();
+        assertEquals(Arrays.asList("hide layer", "show layer"), mHost.layerChanges());
+    }
+
+    @Test
+    public void aLayerMovedAboveTheWindowBeforeItsFirstFrameIsLeftToTheWindow() {
+        mGate.onSurfaceCreated();
+        mHost.layerAboveWindow = true;
+        mGate.onZOrderApplied();
+        mGate.onFirstFramePresented(mGate.currentSurface());
+        mGate.onWindowFrameDrawn();
+        assertEquals(Arrays.asList("hide layer", "hide layer"), mHost.layerChanges());
     }
 }

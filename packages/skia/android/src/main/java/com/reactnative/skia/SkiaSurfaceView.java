@@ -10,6 +10,7 @@ import android.view.AttachedSurfaceControl;
 import android.view.SurfaceControl;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
+import android.view.ViewTreeObserver;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
@@ -39,6 +40,16 @@ public class SkiaSurfaceView extends SurfaceView implements SurfaceHolder.Callba
             return SkiaSurfaceView.this.setLayerShown(shown);
         }
     }, Build.VERSION.SDK_INT);
+    // Registered after SurfaceView's own pre-draw listener, which applies a
+    // changed z-order, so it runs after it in the same pre-draw pass.
+    private final ViewTreeObserver.OnPreDrawListener mZOrderApplied = new ViewTreeObserver.OnPreDrawListener() {
+        @Override
+        public boolean onPreDraw() {
+            getViewTreeObserver().removeOnPreDrawListener(this);
+            mDrawGate.onZOrderApplied();
+            return true;
+        }
+    };
 
     public SkiaSurfaceView(Context context, SkiaViewAPI api, boolean zOrderOnTop,
             boolean zOrderMediaOverlay, boolean opaque) {
@@ -70,6 +81,11 @@ public class SkiaSurfaceView extends SurfaceView implements SurfaceHolder.Callba
             setZOrderMediaOverlay(mediaOverlay);
         }
         invalidate();
+        if (mDrawGate.hidesLayer()) {
+            ViewTreeObserver observer = getViewTreeObserver();
+            observer.removeOnPreDrawListener(mZOrderApplied);
+            observer.addOnPreDrawListener(mZOrderApplied);
+        }
     }
 
     // SurfaceView skips draw() and punches its hole in dispatchDraw.
@@ -81,9 +97,11 @@ public class SkiaSurfaceView extends SurfaceView implements SurfaceHolder.Callba
         }
     }
 
-    // The layer is SurfaceView's own. SurfaceView sets its alpha only for a
-    // layer above the window, and from Android 14 on a z-order change, so a
-    // layer hidden below the window stays hidden until it is shown.
+    // The layer is SurfaceView's own. Before Android 12L SurfaceView shows a
+    // new layer in a transaction it applies at creation, and Android 14 sets a
+    // layer's alpha in the transaction it merges into the window's next frame
+    // on a z-order change, so a hide goes at once and, where the window
+    // applies changes with its frame, again with that frame, after it.
     private boolean setLayerShown(boolean shown) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || (!shown && mOnTop)) {
             return false;
@@ -92,14 +110,15 @@ public class SkiaSurfaceView extends SurfaceView implements SurfaceHolder.Callba
         if (layer == null) {
             return false;
         }
-        SurfaceControl.Transaction transaction =
-                new SurfaceControl.Transaction().setAlpha(layer, shown ? 1f : 0f);
-        AttachedSurfaceControl window = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
-                ? getRootSurfaceControl() : null;
+        float alpha = shown ? 1f : 0f;
+        AttachedSurfaceControl window =
+                Build.VERSION.SDK_INT >= FirstFrameDrawGate.LAYER_SHOWN_WITH_WINDOW_FRAME_FROM
+                        ? getRootSurfaceControl() : null;
+        if (!shown || window == null) {
+            new SurfaceControl.Transaction().setAlpha(layer, alpha).apply();
+        }
         if (window != null) {
-            window.applyTransactionOnDraw(transaction);
-        } else {
-            transaction.apply();
+            window.applyTransactionOnDraw(new SurfaceControl.Transaction().setAlpha(layer, alpha));
         }
         return true;
     }
@@ -113,6 +132,7 @@ public class SkiaSurfaceView extends SurfaceView implements SurfaceHolder.Callba
 
     @Override
     protected void onDetachedFromWindow() {
+        getViewTreeObserver().removeOnPreDrawListener(mZOrderApplied);
         mDrawGate.onDetachedFromWindow();
         super.onDetachedFromWindow();
         releaseSurface();
@@ -156,10 +176,7 @@ public class SkiaSurfaceView extends SurfaceView implements SurfaceHolder.Callba
         mDrawGate.onFirstFramePresented(surface);
     }
 
-    // The native side lets go of the surface, waiting for a present in flight,
-    // before the gate counts it released (see FirstFrameDrawGate.currentSurface).
     private void releaseSurface() {
-        mApi.onSurfaceDestroyed();
-        mDrawGate.onSurfaceReleased();
+        mDrawGate.onSurfaceReleased(mApi::onSurfaceDestroyed);
     }
 }

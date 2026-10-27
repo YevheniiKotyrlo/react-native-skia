@@ -22,13 +22,12 @@ import java.util.ArrayList;
  *
  * A layer below the window shows through every transparent region of the
  * window, another SurfaceView's hole among them, so while its own hole is
- * closed the layer is hidden, from Android 10, where SurfaceView exposes it
- * (getSurfaceControl). From Android 13 it is shown with the window frame that
- * opens the hole (AttachedSurfaceControl.applyTransactionOnDraw). Before it,
- * which has no public way to change a layer with the window's frame, it is
- * shown as that frame is drawn, ahead of the window's buffer: it can show
- * through another hole a frame early, and never leaves its own hole empty.
- * Main thread, but for currentSurface().
+ * closed the layer is hidden. It is shown with the window frame that opens
+ * the hole where the window can apply a layer change with its frame (from
+ * LAYER_SHOWN_WITH_WINDOW_FRAME_FROM), and before that as the frame is drawn,
+ * ahead of the window's buffer: there it can show through another hole a
+ * frame or two early, and never leaves its own hole empty. Main thread, but
+ * for currentSurface().
  */
 final class FirstFrameDrawGate {
     /**
@@ -40,6 +39,9 @@ final class FirstFrameDrawGate {
      * presents, would otherwise hold the window's draw report for good.
      */
     static final long FIRST_FRAME_WAIT_MILLIS = 1000;
+
+    /** The first release whose window applies a layer change with its next frame (AttachedSurfaceControl). */
+    static final int LAYER_SHOWN_WITH_WINDOW_FRAME_FROM = Build.VERSION_CODES.S;
 
     /** What the gate asks of the view that owns it. */
     interface Host {
@@ -53,9 +55,12 @@ final class FirstFrameDrawGate {
         void invalidate();
 
         /**
-         * Hides the surface's layer, or shows it: with the window's next
-         * frame from Android 13, at once before it. Returns false, changing
-         * nothing, for a layer above the window, which has no hole.
+         * Hides the surface's layer at once and, from
+         * LAYER_SHOWN_WITH_WINDOW_FRAME_FROM, again with the window's next
+         * frame; or shows it, with that frame from then and at once before
+         * it. Returns whether the layer took the change: not where the
+         * platform exposes no layer (before Android 10, or with no surface),
+         * and not for a hide of a layer above the window, which has no hole.
          */
         boolean setLayerShown(boolean shown);
     }
@@ -75,12 +80,17 @@ final class FirstFrameDrawGate {
     FirstFrameDrawGate(Host host, int sdkInt) {
         mHost = host;
         mWindowWaitBoundedByPlatform = sdkInt >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE;
-        mLayerShownWithWindowFrame = sdkInt >= Build.VERSION_CODES.TIRAMISU;
+        mLayerShownWithWindowFrame = sdkInt >= LAYER_SHOWN_WITH_WINDOW_FRAME_FROM;
     }
 
     /** Whether a frame has been presented into the current surface: the view opens its hole only then. */
     boolean hasFrame() {
         return mFramePresented;
+    }
+
+    /** Whether the layer is hidden until the hole opens. */
+    boolean hidesLayer() {
+        return mLayerHidden;
     }
 
     /** A new surface: nothing has been presented into it yet. */
@@ -93,6 +103,16 @@ final class FirstFrameDrawGate {
     void onWindowFrameDrawn() {
         if (mFramePresented) {
             showLayer();
+        }
+    }
+
+    /**
+     * SurfaceView applied a z-order change, which from Android 14 shows a
+     * layer below the window: one waiting for its hole is hidden again.
+     */
+    void onZOrderApplied() {
+        if (mLayerHidden) {
+            mLayerHidden = mHost.setLayerShown(false);
         }
     }
 
@@ -112,7 +132,7 @@ final class FirstFrameDrawGate {
     /**
      * The surface a frame presented now goes into, to hand to
      * onFirstFramePresented. The thread that presented reads it while the
-     * native side holds the window, and onSurfaceReleased() counts a surface
+     * native side holds the window, and onSurfaceReleased counts a surface
      * only once the native side has let go of it, so a frame never names a
      * surface created after the one it went into. Any thread.
      */
@@ -134,10 +154,13 @@ final class FirstFrameDrawGate {
     }
 
     /**
-     * The surface is gone, so it has nothing left to draw. Called once the
-     * native side has let go of it (see currentSurface).
+     * The surface is gone, so it has nothing left to draw. releaseNative lets
+     * the native side go of it, waiting for a present in flight, and the
+     * surface is counted released only once it has returned (see
+     * currentSurface).
      */
-    void onSurfaceReleased() {
+    void onSurfaceReleased(Runnable releaseNative) {
+        releaseNative.run();
         mSurfacesReleased++;
         setFramePresented(false);
         cancelDeadline();
