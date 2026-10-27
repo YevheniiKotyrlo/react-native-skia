@@ -206,6 +206,14 @@ bool RNSkGraphiteProducer::isReplaying() {
 }
 
 void RNSkGraphiteProducer::kickLocked() {
+  if (_target != nullptr) {
+    while (auto deferred = _schedule.forgetUnpresentable(
+               [](const std::shared_ptr<RNSkGraphiteRecording> &recording) {
+                 return !recording->isCurrent();
+               })) {
+      _target->submit(std::move(*deferred));
+    }
+  }
   if (_target == nullptr || !hasContentLocked() || !_schedule.tryStartJob()) {
     return;
   }
