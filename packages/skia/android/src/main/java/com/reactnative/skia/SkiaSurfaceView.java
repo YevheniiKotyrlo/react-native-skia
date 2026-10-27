@@ -6,11 +6,8 @@ import android.graphics.Canvas;
 import android.graphics.PixelFormat;
 import android.graphics.Region;
 import android.os.Build;
-import android.view.AttachedSurfaceControl;
-import android.view.SurfaceControl;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
-import android.view.ViewTreeObserver;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
@@ -18,7 +15,6 @@ import androidx.annotation.Nullable;
 public class SkiaSurfaceView extends SurfaceView implements SurfaceHolder.Callback2 {
 
     SkiaViewAPI mApi;
-    private boolean mOnTop = false;
     private final FirstFrameDrawGate mDrawGate = new FirstFrameDrawGate(new FirstFrameDrawGate.Host() {
         @Override
         public void postDelayed(Runnable action, long delayMillis) {
@@ -34,22 +30,7 @@ public class SkiaSurfaceView extends SurfaceView implements SurfaceHolder.Callba
         public void invalidate() {
             SkiaSurfaceView.this.invalidate();
         }
-
-        @Override
-        public boolean setLayerShown(boolean shown) {
-            return SkiaSurfaceView.this.setLayerShown(shown);
-        }
     }, Build.VERSION.SDK_INT);
-    // Registered after SurfaceView's own pre-draw listener, which applies a
-    // changed z-order, so it runs after it in the same pre-draw pass.
-    private final ViewTreeObserver.OnPreDrawListener mZOrderApplied = new ViewTreeObserver.OnPreDrawListener() {
-        @Override
-        public boolean onPreDraw() {
-            getViewTreeObserver().removeOnPreDrawListener(this);
-            mDrawGate.onZOrderApplied();
-            return true;
-        }
-    };
 
     public SkiaSurfaceView(Context context, SkiaViewAPI api, boolean zOrderOnTop,
             boolean zOrderMediaOverlay, boolean opaque) {
@@ -62,9 +43,11 @@ public class SkiaSurfaceView extends SurfaceView implements SurfaceHolder.Callba
     }
 
     // The format drives the compositor's opaque flag for this layer. It can
-    // change on a live surface: SurfaceView reports it through surfaceChanged.
+    // change on a live surface: SurfaceHolder.setFormat replaces the surface
+    // before it returns (SurfaceView.updateSurface), which the gate keeps
+    // showing its last frame through.
     public void setOpaque(boolean opaque) {
-        getHolder().setFormat(opaque ? PixelFormat.OPAQUE : PixelFormat.TRANSLUCENT);
+        mDrawGate.changeFormat(() -> getHolder().setFormat(opaque ? PixelFormat.OPAQUE : PixelFormat.TRANSLUCENT));
     }
 
     // The sublayer the surface is composited at, relative to the window: above
@@ -75,52 +58,19 @@ public class SkiaSurfaceView extends SurfaceView implements SurfaceHolder.Callba
     // applies a changed request with the window's next frame (its pre-draw
     // listener runs updateSurface()), which invalidate() schedules.
     public void setZOrder(boolean onTop, boolean mediaOverlay) {
-        mOnTop = onTop;
         setZOrderOnTop(onTop);
         if (!onTop) {
             setZOrderMediaOverlay(mediaOverlay);
         }
         invalidate();
-        if (mDrawGate.hidesLayer()) {
-            ViewTreeObserver observer = getViewTreeObserver();
-            observer.removeOnPreDrawListener(mZOrderApplied);
-            observer.addOnPreDrawListener(mZOrderApplied);
-        }
     }
 
     // SurfaceView skips draw() and punches its hole in dispatchDraw.
     @Override
     protected void dispatchDraw(@NonNull Canvas canvas) {
-        mDrawGate.onWindowFrameDrawn();
         if (mDrawGate.hasFrame()) {
             super.dispatchDraw(canvas);
         }
-    }
-
-    // The layer is SurfaceView's own. Before Android 12L SurfaceView shows a
-    // new layer in a transaction it applies at creation, and Android 14 sets a
-    // layer's alpha in the transaction it merges into the window's next frame
-    // on a z-order change, so a hide goes at once and, where the window
-    // applies changes with its frame, again with that frame, after it.
-    private boolean setLayerShown(boolean shown) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || (!shown && mOnTop)) {
-            return false;
-        }
-        SurfaceControl layer = getSurfaceControl();
-        if (layer == null) {
-            return false;
-        }
-        float alpha = shown ? 1f : 0f;
-        AttachedSurfaceControl window =
-                Build.VERSION.SDK_INT >= FirstFrameDrawGate.LAYER_SHOWN_WITH_WINDOW_FRAME_FROM
-                        ? getRootSurfaceControl() : null;
-        if (!shown || window == null) {
-            new SurfaceControl.Transaction().setAlpha(layer, alpha).apply();
-        }
-        if (window != null) {
-            window.applyTransactionOnDraw(new SurfaceControl.Transaction().setAlpha(layer, alpha));
-        }
-        return true;
     }
 
     // SurfaceView adds its bounds to the window's transparent region once its
@@ -132,7 +82,6 @@ public class SkiaSurfaceView extends SurfaceView implements SurfaceHolder.Callba
 
     @Override
     protected void onDetachedFromWindow() {
-        getViewTreeObserver().removeOnPreDrawListener(mZOrderApplied);
         mDrawGate.onDetachedFromWindow();
         super.onDetachedFromWindow();
         releaseSurface();

@@ -20,13 +20,12 @@ import java.util.ArrayList;
  * surface it went into, and one reported for a surface released since opens
  * nothing.
  *
- * A layer below the window shows through every transparent region of the
- * window, another SurfaceView's hole among them, so while its own hole is
- * closed the layer is hidden. It is shown with the window frame that opens
- * the hole where the window can apply a layer change with its frame (from
- * LAYER_SHOWN_WITH_WINDOW_FRAME_FROM), and before that as the frame is drawn,
- * ahead of the window's buffer: there it can show through another hole a
- * frame or two early, and never leaves its own hole empty. Main thread, but
+ * A change of the surface's format replaces the surface while its last frame
+ * stays on screen: from Android 12 SurfaceView keeps the layer, which shows
+ * the old buffers until new ones replace them, and before it SurfaceView
+ * removes the old layer only once the new surface's draw is reported. So the
+ * hole stays open through a surface replaced by changeFormat(), and the new
+ * surface's draw report still waits for its own first frame. Main thread, but
  * for currentSurface().
  */
 final class FirstFrameDrawGate {
@@ -40,9 +39,6 @@ final class FirstFrameDrawGate {
      */
     static final long FIRST_FRAME_WAIT_MILLIS = 1000;
 
-    /** The first release whose window applies a layer change with its next frame (AttachedSurfaceControl). */
-    static final int LAYER_SHOWN_WITH_WINDOW_FRAME_FROM = Build.VERSION_CODES.S;
-
     /** What the gate asks of the view that owns it. */
     interface Host {
         /** Runs action on the main thread after delayMillis, unless removed. */
@@ -53,25 +49,15 @@ final class FirstFrameDrawGate {
 
         /** hasFrame() changed: the view redraws, opening or closing its hole. */
         void invalidate();
-
-        /**
-         * Hides the surface's layer at once and, from
-         * LAYER_SHOWN_WITH_WINDOW_FRAME_FROM, again with the window's next
-         * frame; or shows it, with that frame from then and at once before
-         * it. Returns whether the layer took the change: not where the
-         * platform exposes no layer (before Android 10, or with no surface),
-         * and not for a hide of a layer above the window, which has no hole.
-         */
-        boolean setLayerShown(boolean shown);
     }
 
     private final Host mHost;
     private final boolean mWindowWaitBoundedByPlatform;
-    private final boolean mLayerShownWithWindowFrame;
     private final Runnable mFirstFrameDeadline = this::onFirstFrameDeadline;
     private boolean mFramePresented = false;
+    private boolean mFrameShown = false;
+    private boolean mChangingFormat = false;
     private boolean mDeadlinePosted = false;
-    private boolean mLayerHidden = false;
     // The surfaces released so far: written on the main thread, read on the
     // thread that presents (see currentSurface).
     private volatile int mSurfacesReleased = 0;
@@ -80,39 +66,31 @@ final class FirstFrameDrawGate {
     FirstFrameDrawGate(Host host, int sdkInt) {
         mHost = host;
         mWindowWaitBoundedByPlatform = sdkInt >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE;
-        mLayerShownWithWindowFrame = sdkInt >= LAYER_SHOWN_WITH_WINDOW_FRAME_FROM;
     }
 
-    /** Whether a frame has been presented into the current surface: the view opens its hole only then. */
+    /** Whether the surface's layer shows a frame: the view opens its hole only then. */
     boolean hasFrame() {
-        return mFramePresented;
+        return mFrameShown;
     }
 
-    /** Whether the layer is hidden until the hole opens. */
-    boolean hidesLayer() {
-        return mLayerHidden;
+    /**
+     * Runs setFormat, which changes the surface's format: SurfaceView replaces
+     * the surface inside it, and the replaced one's frame stays shown.
+     */
+    void changeFormat(Runnable setFormat) {
+        mChangingFormat = true;
+        try {
+            setFormat.run();
+        } finally {
+            mChangingFormat = false;
+        }
     }
 
     /** A new surface: nothing has been presented into it yet. */
     void onSurfaceCreated() {
-        setFramePresented(false);
-        mLayerHidden = mHost.setLayerShown(false);
-    }
-
-    /** The view draws itself into a window frame, which opens its hole once hasFrame(). */
-    void onWindowFrameDrawn() {
-        if (mFramePresented) {
-            showLayer();
-        }
-    }
-
-    /**
-     * SurfaceView applied a z-order change, which from Android 14 shows a
-     * layer below the window: one waiting for its hole is hidden again.
-     */
-    void onZOrderApplied() {
-        if (mLayerHidden) {
-            mLayerHidden = mHost.setLayerShown(false);
+        mFramePresented = false;
+        if (!mChangingFormat) {
+            setFrameShown(false);
         }
     }
 
@@ -145,10 +123,8 @@ final class FirstFrameDrawGate {
         if (surface != mSurfacesReleased) {
             return;
         }
-        if (mLayerShownWithWindowFrame) {
-            showLayer();
-        }
-        setFramePresented(true);
+        mFramePresented = true;
+        setFrameShown(true);
         cancelDeadline();
         reportPendingDraws();
     }
@@ -162,7 +138,10 @@ final class FirstFrameDrawGate {
     void onSurfaceReleased(Runnable releaseNative) {
         releaseNative.run();
         mSurfacesReleased++;
-        setFramePresented(false);
+        mFramePresented = false;
+        if (!mChangingFormat) {
+            setFrameShown(false);
+        }
         cancelDeadline();
         reportPendingDraws();
     }
@@ -178,16 +157,9 @@ final class FirstFrameDrawGate {
         reportPendingDraws();
     }
 
-    private void showLayer() {
-        if (mLayerHidden) {
-            mLayerHidden = false;
-            mHost.setLayerShown(true);
-        }
-    }
-
-    private void setFramePresented(boolean framePresented) {
-        if (mFramePresented != framePresented) {
-            mFramePresented = framePresented;
+    private void setFrameShown(boolean frameShown) {
+        if (mFrameShown != frameShown) {
+            mFrameShown = frameShown;
             mHost.invalidate();
         }
     }
