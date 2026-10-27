@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <utility>
@@ -86,7 +87,10 @@ protected:
   // Main thread, before the platform destroys the window: waits for the
   // present in flight, if any, then lets go of the window (see
   // RNSkWindowSurface::detach).
-  void surfaceDestroyed() { _surface->detach(); }
+  void surfaceDestroyed() {
+    _awaitingFirstFrame->store(false);
+    _surface->detach();
+  }
 
   /**
    The pixel size the backing view was laid out with. The surface it gets
@@ -158,12 +162,29 @@ private:
       : _manager(skiaManager->cthis()->getSkiaManager()) {
     auto context = skiaManager->cthis()->getPlatformContext();
     _surface = std::make_shared<RNSkWindowSurface>();
+    // Weak: the Java view owns this object through its hybrid data, and the
+    // surface is shared with the view and can outlive this object.
+    auto javaView = std::make_shared<JavaView>(jThis);
+    // The first frame presented into a SurfaceView's window, on the present
+    // thread: the Java view opens its draw gate on the main thread.
+    _surface->setDidPresent(
+        [javaView, awaitingFirstFrame = _awaitingFirstFrame]() {
+          if (!awaitingFirstFrame->exchange(false)) {
+            return;
+          }
+          jni::ThreadScope threadScope;
+          auto javaPart = javaView->weak->lockLocal();
+          if (!javaPart) {
+            return;
+          }
+          static const auto method =
+              javaPart->getClass()->getMethod<void()>("onFirstFramePresented");
+          method(javaPart);
+        });
     _view = std::make_shared<RNSkView>(context, _surface);
     // Tasks for the present thread go through the Java view, which owns the
-    // thread. Weak: the Java view owns this object through its hybrid data;
-    // a task for a view that is gone is dropped. Called from any thread, the
-    // render thread pool's included, hence the thread scope.
-    auto javaView = std::make_shared<JavaView>(jThis);
+    // thread. A task for a view that is gone is dropped. Called from any
+    // thread, the render thread pool's included, hence the thread scope.
     _view->setPresentThread([javaView](std::function<void()> task) {
       jni::ThreadScope threadScope;
       auto javaPart = javaView->weak->lockLocal();
@@ -248,6 +269,9 @@ private:
       releaseWindow(nullptr, ownedSurface);
       return;
     }
+    // A SurfaceView waits for its first frame before it lets the window show
+    // the surface (SkiaSurfaceView.surfaceRedrawNeededAsync).
+    _awaitingFirstFrame->store(isSurface);
     _surface->attach(window, width, height, highBitDepth,
                      /* useP3ColorSpace= */ false,
                      [ownedSurface](void *nativeHandle) {
@@ -278,6 +302,9 @@ private:
   }
 
   std::weak_ptr<RNSkManager> _manager;
+  // Set when a SurfaceView's window is attached, cleared by its first present.
+  std::shared_ptr<std::atomic<bool>> _awaitingFirstFrame =
+      std::make_shared<std::atomic<bool>>(false);
   // Declared before the view, which unbinds itself from the surface when it
   // is destroyed.
   std::shared_ptr<RNSkWindowSurface> _surface;

@@ -62,6 +62,9 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
     @Nullable
     private volatile BackingViewKind mKind = null;
     private boolean mSurfaceHighBitDepth = false;
+    // The SurfaceView surfaces the native side let go of. Written on the main
+    // thread, read on the present thread (see onFirstFramePresented).
+    private volatile int mSurfacesReleased = 0;
 
     private final SurfaceFrameRateVote mFrameRateVote = new SurfaceFrameRateVote(this);
     private final Runnable mOnFrameConsumed = this::onFrameConsumed;
@@ -295,6 +298,21 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
     // Frames --------------------------------------------------------------
 
     /**
+     * The first frame was presented into a SurfaceView's surface. Present
+     * thread, while the native side holds the window; called from native. The
+     * draw gate opens on the main thread, unless the surface went meanwhile.
+     */
+    @DoNotStrip
+    public void onFirstFramePresented() {
+        final int surfacesReleased = mSurfacesReleased;
+        post(() -> {
+            if (surfacesReleased == mSurfacesReleased && mKind == BackingViewKind.SURFACE_VIEW) {
+                ((SkiaSurfaceView) mView).onFirstFramePresented();
+            }
+        });
+    }
+
+    /**
      * Runs a task on the present thread, never on the spot (the native side
      * posts with locks held). Any thread; called from native.
      */
@@ -411,6 +429,9 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
             return;
         }
         surfaceDestroyed();
+        // The native side has waited for the present in flight: a first frame
+        // reported from now on is the next surface's.
+        mSurfacesReleased++;
     }
 
     @Override
