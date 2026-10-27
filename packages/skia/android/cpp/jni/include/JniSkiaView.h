@@ -50,7 +50,8 @@ public:
          makeNativeMethod("unregisterView", JniSkiaView::unregisterView),
          makeNativeMethod("presentFrame", JniSkiaView::presentFrame),
          makeNativeMethod("holdPresents", JniSkiaView::holdPresents),
-         makeNativeMethod("releasePresents", JniSkiaView::releasePresents)});
+         makeNativeMethod("releasePresents", JniSkiaView::releasePresents),
+         makeNativeMethod("tick", JniSkiaView::tick)});
   }
 
   // The manager is owned by the RNSkiaModule and is destroyed when the module
@@ -133,10 +134,17 @@ protected:
   }
 
   // The Java view's frame scheduler, on the thread the view presents on:
-  // presents the queued recordings, says whether a frame went to the window
-  // and whether more are waiting (see RNSkView::presentFrame). The Java view
-  // keeps this object alive for the call (see SkiaView.dropInstance).
-  int presentFrame() { return _view->presentFrame(); }
+  // presents what is waiting after the ticks it counted, says whether a frame
+  // went to the window, whether one is left and whether a replay is coming
+  // (see RNSkView::presentFrame). The Java view keeps this object alive for
+  // the call (see SkiaView.dropInstance).
+  int presentFrame(int ticks) {
+    return _view->presentFrame(static_cast<size_t>(ticks));
+  }
+
+  // The Java view's frame scheduler, on a vsync while the TextureView's
+  // window has yet to draw its frame: counts the tick (see RNSkView::tick).
+  int tick() { return _view->tick(); }
 
   // Main thread. The backing view's layer would show a frame before the
   // window frame that lays it out: nothing is presented until
@@ -161,7 +169,13 @@ private:
                        jni::alias_ref<JniSkiaManager::javaobject> skiaManager)
       : _manager(skiaManager->cthis()->getSkiaManager()) {
     auto context = skiaManager->cthis()->getPlatformContext();
-    _surface = std::make_shared<RNSkWindowSurface>();
+    // A window's present waits, on the thread that presents, until the GPU
+    // has finished the frame presented before it (libgui's queueBuffer, for
+    // every Vulkan swapchain), and holds Dawn's device lock meanwhile; its
+    // compositor takes one frame a vsync: a frame replayed that early, or a
+    // second one in a tick, is held.
+    _surface = std::make_shared<RNSkWindowSurface>(
+        PresentHold::kOncePerTickAfterPreviousFrame);
     // Weak: the Java view owns this object through its hybrid data, and the
     // surface is shared with the view and can outlive this object.
     auto javaView = std::make_shared<JavaView>(jThis);
