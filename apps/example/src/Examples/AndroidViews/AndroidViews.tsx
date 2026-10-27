@@ -102,10 +102,12 @@ export const AndroidViews = () => {
   // zOrderMediaOverlay) and on zOrderMediaOverlay from Android 14, and reads
   // them at mount elsewhere.
   const surfaceView = backingView === "SurfaceView";
+  const androidSurfaceView = Platform.OS === "android" && surfaceView;
   const version = Number(Platform.Version);
   const onTopAtMount =
-    surfaceView && (version < 30 || (version === 33 && zOrderMediaOverlay));
-  const mediaOverlayAtMount = surfaceView && version < 34;
+    androidSurfaceView &&
+    (version < 30 || (version === 33 && zOrderMediaOverlay));
+  const mediaOverlayAtMount = androidSurfaceView && version < 34;
   const backingKey = `${backingView}-${onTopAtMount ? zOrderOnTop : ""}-${
     mediaOverlayAtMount ? zOrderMediaOverlay : ""
   }`;

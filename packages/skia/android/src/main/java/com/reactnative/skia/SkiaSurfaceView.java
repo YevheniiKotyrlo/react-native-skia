@@ -11,10 +11,22 @@ import androidx.annotation.NonNull;
 public class SkiaSurfaceView extends SurfaceView implements SurfaceHolder.Callback {
 
     SkiaViewAPI mApi;
-    // The z-order last asked of SurfaceView, which starts as neither on top nor
-    // a media overlay: setZOrder() asks only for a change.
-    private boolean mZOrderOnTop = false;
-    private boolean mZOrderMediaOverlay = false;
+    private final SurfaceZOrder mZOrder = new SurfaceZOrder(new SurfaceZOrder.Target() {
+        @Override
+        public void setZOrderOnTop(boolean onTop) {
+            SkiaSurfaceView.this.setZOrderOnTop(onTop);
+        }
+
+        @Override
+        public void setZOrderMediaOverlay(boolean mediaOverlay) {
+            SkiaSurfaceView.this.setZOrderMediaOverlay(mediaOverlay);
+        }
+
+        @Override
+        public void invalidate() {
+            SkiaSurfaceView.this.invalidate();
+        }
+    });
 
     public SkiaSurfaceView(Context context, SkiaViewAPI api, boolean zOrderOnTop,
             boolean zOrderMediaOverlay, boolean opaque) {
@@ -32,24 +44,11 @@ public class SkiaSurfaceView extends SurfaceView implements SurfaceHolder.Callba
         getHolder().setFormat(opaque ? PixelFormat.OPAQUE : PixelFormat.TRANSLUCENT);
     }
 
-    // The sublayer the surface is composited at, relative to the window: above
-    // it (on top), or below it, above the other SurfaceViews there (media
-    // overlay) or among them (the default). setZOrderOnTop(false) resets the
-    // request to the default, so it goes first. Where Android allows it (see
-    // BackingViewKind), a live surface takes a changed request with the
-    // window's next frame, which invalidate() schedules; elsewhere, the request
-    // is read when the surface is created.
+    // See SurfaceZOrder. Where Android allows it (see BackingViewKind), a live
+    // surface takes a changed request with the window's next frame; elsewhere,
+    // the request is read when the surface is created.
     public void setZOrder(boolean onTop, boolean mediaOverlay) {
-        if (onTop == mZOrderOnTop && mediaOverlay == mZOrderMediaOverlay) {
-            return;
-        }
-        mZOrderOnTop = onTop;
-        mZOrderMediaOverlay = mediaOverlay;
-        setZOrderOnTop(onTop);
-        if (!onTop) {
-            setZOrderMediaOverlay(mediaOverlay);
-        }
-        invalidate();
+        mZOrder.request(onTop, mediaOverlay);
     }
 
     @Override

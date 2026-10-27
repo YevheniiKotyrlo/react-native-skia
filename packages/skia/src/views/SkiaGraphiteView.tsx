@@ -1,13 +1,20 @@
-import React, { useEffect, useImperativeHandle, useMemo, useRef } from "react";
+import React, {
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import type { SkGraphiteContext } from "../skia/types";
 import SkiaViewNativeComponent from "../specs/SkiaViewNativeComponent";
 
 import { SkiaViewApi } from "./api";
+import type { MountedAndroidView } from "./android";
 import {
   androidNativeProps,
+  resolveBackingView,
   resolveHighBitDepth,
-  useBackingViewWarning,
 } from "./android";
 import type { SkiaGraphiteViewNativeProps } from "./types";
 import { measureLayout } from "./measureLayout";
@@ -38,8 +45,11 @@ export const SkiaGraphiteView = ({
   const nativeId = useMemo(() => SkiaViewApi.allocateNativeId(), []);
   const viewRef =
     useRef<React.ComponentRef<typeof SkiaViewNativeComponent>>(null);
-  useBackingViewWarning({ highBitDepth, android });
-  const surfaceHighBitDepth = resolveHighBitDepth({ highBitDepth, android });
+  const [mounted] = useState((): MountedAndroidView => ({
+    backingView: resolveBackingView(android),
+    highBitDepth,
+  }));
+  const surfaceHighBitDepth = resolveHighBitDepth(highBitDepth, mounted);
   // Retires the native target made for this id on unmount, in case no native
   // view ever bound to it; a bound target is retired by the view's teardown.
   // StrictMode runs this cleanup right after mount too, possibly before the
@@ -82,7 +92,7 @@ export const SkiaGraphiteView = ({
       collapsable={false}
       nativeID={`${nativeId}`}
       highBitDepth={highBitDepth}
-      {...androidNativeProps(android)}
+      {...androidNativeProps(android, mounted.backingView)}
       {...viewProps}
     />
   );

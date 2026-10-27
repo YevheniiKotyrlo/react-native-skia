@@ -25,9 +25,9 @@ export interface AndroidTextureViewProps {
    */
   opaque?: boolean;
   /** `SurfaceView` only: name it with `backingView: "SurfaceView"`. */
-  zOrderOnTop?: never;
+  zOrderOnTop?: false;
   /** `SurfaceView` only: name it with `backingView: "SurfaceView"`. */
-  zOrderMediaOverlay?: never;
+  zOrderMediaOverlay?: false;
 }
 
 /** The options of a canvas backed by a `SurfaceView`. */
@@ -74,16 +74,16 @@ export interface AndroidHardwareBufferViewProps {
    * composites with alpha.
    */
   backingView: "HardwareBufferView";
-  opaque?: never;
-  zOrderOnTop?: never;
-  zOrderMediaOverlay?: never;
+  opaque?: false;
+  zOrderOnTop?: false;
+  zOrderMediaOverlay?: false;
 }
 
 /**
  * Android-only rendering options: the native view behind the canvas and its
  * options. The view is created when the canvas mounts and kept: a change of
- * `backingView` is ignored, with a warning in development; remount the canvas
- * (with a `key`) to change it. `opaque` applies in place, and so do
+ * `backingView` is ignored, with a warning; remount the canvas (with a `key`)
+ * to change it. `opaque` applies in place, and so do
  * `zOrderOnTop` on Android 11 and later (on Android 13 only without
  * `zOrderMediaOverlay`) and `zOrderMediaOverlay` on Android 14 and later.
  * Ignored on iOS and web.

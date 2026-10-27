@@ -15,7 +15,7 @@ import type {
 } from "react-native";
 
 import { SkiaViewApi } from "../views/api";
-import { androidNativeProps, useBackingViewWarning } from "../views/android";
+import { androidNativeProps, resolveBackingView } from "../views/android";
 import type { AndroidCanvasProps } from "../views/types";
 import SkiaViewNativeComponent from "../specs/SkiaViewNativeComponent";
 import { measureLayout } from "../views/measureLayout";
@@ -168,14 +168,15 @@ export const Canvas = ({
   ...viewProps
 }: CanvasProps) => {
   const { nativeId, viewRef } = useCanvasRoot({ children, ref });
-  useBackingViewWarning({ highBitDepth, android });
+  // The native view keeps the backing view it mounted with.
+  const [mountedBackingView] = useState(() => resolveBackingView(android));
   return (
     <SkiaViewNativeComponent
       ref={viewRef}
       collapsable={false}
       nativeID={`${nativeId}`}
       highBitDepth={highBitDepth}
-      {...androidNativeProps(android)}
+      {...androidNativeProps(android, mountedBackingView)}
       {...viewProps}
     />
   );

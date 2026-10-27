@@ -51,18 +51,22 @@ const mountView = ({
   document.body.appendChild(container);
   const root = createRoot(container);
   const ref = React.createRef<SkiaGraphiteViewRef>();
-  const element = <SkiaGraphiteView {...props} ref={ref} />;
-  act(() => {
-    root.render(
-      strict ? <React.StrictMode>{element}</React.StrictMode> : element
-    );
-  });
+  const render = (renderedProps: SkiaGraphiteViewProps) => {
+    const element = <SkiaGraphiteView {...renderedProps} ref={ref} />;
+    act(() => {
+      root.render(
+        strict ? <React.StrictMode>{element}</React.StrictMode> : element
+      );
+    });
+  };
+  render(props);
   const view = ref.current;
   if (view === null) {
     throw new Error("SkiaGraphiteView did not attach its ref");
   }
   return {
     view,
+    rerender: render,
     unmount: async () => {
       await act(async () => root.unmount());
       container.remove();
@@ -74,16 +78,9 @@ beforeAll(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 });
 
-let warn: jest.SpyInstance;
-
 beforeEach(() => {
   SkiaViewApi.makeGraphiteContext.mockReset();
   SkiaViewApi.destroyGraphiteContext.mockReset();
-  warn = jest.spyOn(console, "warn").mockImplementation(() => {});
-});
-
-afterEach(() => {
-  warn.mockRestore();
 });
 
 // A host laid out at 200 × 100 points and drawn at half that size: measured
@@ -121,14 +118,14 @@ describe("SkiaGraphiteView on native", () => {
 
   // Until the native view binds, the context records for the format the
   // props call for: 10-bit on a SurfaceView only, as the view will have it.
-  it.each<[SkiaGraphiteViewProps["android"], boolean, number]>([
-    [{ opaque: true }, false, 1],
-    [{ backingView: "HardwareBufferView" }, false, 2],
-    [{ backingView: "SurfaceView" }, true, 0],
-    [{ backingView: "SurfaceView", opaque: false }, true, 1],
+  it.each<[SkiaGraphiteViewProps["android"], boolean]>([
+    [{ opaque: true }, false],
+    [{ backingView: "HardwareBufferView" }, false],
+    [{ backingView: "SurfaceView" }, true],
+    [{ backingView: "SurfaceView", opaque: false }, true],
   ])(
     "records %j with highBitDepth for the 10-bit format: %s",
-    async (android, highBitDepth, warnings) => {
+    async (android, highBitDepth) => {
       mockHost = createScaledHost();
       const { view, unmount } = mountView({
         props: { highBitDepth: true, android },
@@ -137,15 +134,31 @@ describe("SkiaGraphiteView on native", () => {
       expect(SkiaViewApi.makeGraphiteContext.mock.calls[0].at(-1)).toBe(
         highBitDepth
       );
-      expect(warn).toHaveBeenCalledTimes(warnings);
+      await unmount();
+    }
+  );
+
+  // The native view keeps the buffer format it was created with.
+  it.each([true, false])(
+    "records for the bit depth it mounted with, highBitDepth %s",
+    async (highBitDepth) => {
+      mockHost = createScaledHost();
+      const android = { backingView: "SurfaceView" } as const;
+      const { view, rerender, unmount } = mountView({
+        props: { highBitDepth, android },
+      });
+      rerender({ highBitDepth: !highBitDepth, android });
+      view.getContext();
+      expect(SkiaViewApi.makeGraphiteContext.mock.calls[0].at(-1)).toBe(
+        highBitDepth
+      );
       await unmount();
     }
   );
 
   // The view makes a canvas with the 10-bit format opaque from the format it
   // was created with, so a translucent SurfaceView asks for a translucent
-  // surface whatever highBitDepth says; the opacity never follows a later
-  // change of highBitDepth, which the view ignores.
+  // surface whatever highBitDepth says.
   it.each([false, true])(
     "hands a translucent SurfaceView's opacity to the view with highBitDepth %s",
     async (highBitDepth) => {
@@ -160,10 +173,24 @@ describe("SkiaGraphiteView on native", () => {
         androidBackingView: "SurfaceView",
         androidOpaque: false,
       });
-      expect(warn).toHaveBeenCalledTimes(highBitDepth ? 1 : 0);
       await unmount();
     }
   );
+
+  // The native view ignores a later backingView, so the opacity keeps the
+  // default of the view it mounted with.
+  it("resolves the opacity for the view it mounted with", async () => {
+    mockHost = createScaledHost();
+    const { rerender, unmount } = mountView({
+      props: { android: { backingView: "SurfaceView" } },
+    });
+    rerender({ android: { backingView: "TextureView" } });
+    expect(mockNativeProps).toMatchObject({
+      androidBackingView: "TextureView",
+      androidOpaque: true,
+    });
+    await unmount();
+  });
 
   // The native target made for the id outlives the context JS holds; the
   // view retires it on unmount in case no native view ever bound to it.

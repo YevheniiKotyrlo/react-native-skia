@@ -400,7 +400,6 @@ private:
       double pd = _context->getPixelDensity();
       info.width = static_cast<int>(std::lround(width * pd));
       info.height = static_cast<int>(std::lround(height * pd));
-    } else {
     }
     info.colorType = highBitDepth ? DawnUtils::HighBitDepthColorType
                                   : DawnUtils::PreferedColorType;

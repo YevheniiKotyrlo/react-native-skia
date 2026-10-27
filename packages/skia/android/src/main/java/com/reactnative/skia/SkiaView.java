@@ -15,6 +15,7 @@ import com.facebook.jni.HybridData;
 import com.facebook.jni.annotations.DoNotStrip;
 import com.facebook.react.bridge.ReactContext;
 import com.facebook.react.uimanager.PointerEvents;
+import com.facebook.react.util.RNLog;
 import com.facebook.react.views.view.ReactViewGroup;
 
 /**
@@ -48,6 +49,8 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
     // (see setOpaque), and so are the z-order props where Android allows it
     // (see takesZOrder); the others are read once, when the backing view is
     // created (see updateView()).
+    @Nullable
+    private String mBackingViewName = null;
     private BackingViewKind mBackingView = BackingViewKind.TEXTURE_VIEW;
     private boolean mOpaque = false;
     private boolean mZOrderOnTop = false;
@@ -126,15 +129,15 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
     // kept (see updateView()). React calls a setter again only when its prop
     // changed, so a call on a mounted canvas is a change: the setters below
     // apply it in place where the view can take it, else they ignore it and
-    // say so (a canvas that needs another backing view is remounted, with a
-    // new key). The JS side warns about the same changes in development
-    // (see views/android.ts), mirroring these rules.
+    // say so, in logcat and in the JS console (a canvas that needs another
+    // backing view is remounted, with a new key).
 
     public void setBackingView(@Nullable String value) {
         if (mKind != null) {
             warnIgnoredOnceMounted("android.backingView");
             return;
         }
+        mBackingViewName = value;
         mBackingView = BackingViewKind.fromBackingView(value);
     }
 
@@ -196,24 +199,28 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
     }
 
     private void warnIgnoredOnceMounted(String prop) {
-        Log.w(TAG, "Ignoring a change of " + prop + " on a mounted canvas: the backing view"
-                + " is chosen when the canvas mounts. Remount the canvas (give it a new key)"
-                + " to change it.");
+        warn(BackingViewWarnings.ignoredChange(prop));
+    }
+
+    // RNLog writes the warning to logcat and, in development, to the JS
+    // console and LogBox, where a JS developer looks.
+    private void warn(String message) {
+        RNLog.w((ReactContext) getContext(), message);
     }
 
     // Apply the complete prop transaction once, after every prop has arrived.
     // The first one creates the backing view, which is then kept: a
     // SurfaceView must know its buffer format before it attaches (and its
     // z-order, where Android does not move a live surface), and keeping a
-    // canvas on screen while its
-    // backing view is replaced takes hold-and-retire logic specific to each
-    // Android release (see PRs #4189 and #4192), which this view does not
-    // carry. A canvas that needs another backing view is remounted instead,
-    // and is off screen for a frame or two until the new view draws its first
-    // frame. Later transactions apply the opacity in place: the surface's
-    // pixel format on a SurfaceView, the view's opacity on a TextureView; and
-    // a SurfaceView's z-order as its setters took it, once per transaction so
-    // that a change of both z-order props moves the surface once.
+    // canvas on screen while its backing view is replaced takes
+    // hold-and-retire logic specific to each Android release (see PRs #4189
+    // and #4192), which this view does not carry. A canvas that needs another
+    // backing view is remounted instead, and is off screen for a frame or two
+    // until the new view draws its first frame. Later transactions apply the
+    // opacity in place: the surface's pixel format on a SurfaceView, the
+    // view's opacity on a TextureView; and a SurfaceView's z-order as its
+    // setters took it, once per transaction so that a change of both z-order
+    // props moves the surface once.
     void updateView() {
         BackingViewKind kind = mKind;
         if (kind != null) {
@@ -231,8 +238,9 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
         kind = mBackingView;
         mKind = kind;
         mSurfaceHighBitDepth = BackingViewKind.resolveHighBitDepth(kind, mHighBitDepth);
-        if (mHighBitDepth && !mSurfaceHighBitDepth) {
-            Log.w(TAG, "highBitDepth needs a SurfaceView on Android, keeping the 8-bit format");
+        for (String warning : BackingViewWarnings.atMount(mBackingViewName, mHighBitDepth, mOpaque,
+                mZOrderOnTop, mZOrderMediaOverlay)) {
+            warn(warning);
         }
         boolean opaque = BackingViewKind.resolveOpaque(mOpaque, mSurfaceHighBitDepth);
         // The surface will have this format: a frame recorded before it

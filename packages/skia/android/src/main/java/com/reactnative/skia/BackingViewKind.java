@@ -6,8 +6,7 @@ import androidx.annotation.Nullable;
 
 /**
  * The Android view a SkiaView draws into, see SkiaView.updateView(), and the
- * rules the props resolve by. The JS side (views/android.ts) mirrors them to
- * warn in development.
+ * rules the props resolve by.
  */
 enum BackingViewKind {
     SURFACE_VIEW,
@@ -17,8 +16,8 @@ enum BackingViewKind {
      * The kind the androidBackingView prop names. "HardwareBufferView" (a plain
      * view drawing each frame's AHardwareBuffer inline, as React Native WebGPU's
      * does) is not available here yet: it falls back to a TextureView, which
-     * composites the same way, and the JS side warns about it in development.
-     * The default is a TextureView.
+     * composites the same way, with a warning (see BackingViewWarnings). The
+     * default is a TextureView.
      */
     static BackingViewKind fromBackingView(@Nullable String backingView) {
         return "SurfaceView".equals(backingView) ? SURFACE_VIEW : TEXTURE_VIEW;
