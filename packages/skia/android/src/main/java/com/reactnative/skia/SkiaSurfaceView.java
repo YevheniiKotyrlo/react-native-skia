@@ -91,7 +91,13 @@ public class SkiaSurfaceView extends SurfaceView implements SurfaceHolder.Callba
     // SurfaceView skips draw() and punches its hole in dispatchDraw.
     @Override
     protected void dispatchDraw(@NonNull Canvas canvas) {
-        mDrawGate.onWindowFrameDrawn();
+        if (mDrawGate.hasFrame() && mDrawGate.hidesLayer()
+                && Build.VERSION.SDK_INT < FirstFrameDrawGate.LAYER_SHOWN_WITH_WINDOW_FRAME_FROM
+                && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            getViewTreeObserver().registerFrameCommitCallback(mDrawGate::onWindowFrameDrawn);
+        } else {
+            mDrawGate.onWindowFrameDrawn();
+        }
         if (mDrawGate.hasFrame()) {
             super.dispatchDraw(canvas);
         }
