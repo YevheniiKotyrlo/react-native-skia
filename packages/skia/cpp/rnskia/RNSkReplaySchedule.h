@@ -126,6 +126,22 @@ public:
   }
 
   /**
+   The view's recording on the target can never be presented, as
+   `unpresentable` says of it (made for a GPU device lost since: the target
+   drops it with the queue, or the view skips it), so it is not waited for.
+   Returns the deferred recording, to submit now, if there is one.
+   */
+  template <typename Unpresentable>
+  [[nodiscard]] std::optional<Recording>
+  forgetUnpresentable(Unpresentable &&unpresentable) {
+    if (!_onTarget.has_value() || !unpresentable(*_onTarget)) {
+      return std::nullopt;
+    }
+    _onTarget = std::exchange(_deferred, std::nullopt);
+    return _onTarget;
+  }
+
+  /**
    The view moved to another target. Its recording on the previous one is not
    coming through this view anymore (the view unbound itself from it): it is
    not waited for. Returns the deferred recording, which was made for the
