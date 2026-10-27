@@ -155,9 +155,10 @@ public:
 
   /**
    Schedules redraw() on the present thread, once. A redraw the window could
-   not show (the app in the background) stays requested until onCanPresent()
-   schedules it again. Any thread: the window surface asks for one from the
-   main thread, with its own mutex held, so nothing is presented on the spot.
+   not show (see RNSkWindowSurface::canPresent) stays requested until
+   requestDeclinedFrame() schedules it again. Any thread: the window surface
+   asks for one from the main thread, with its own mutex held, so nothing is
+   presented on the spot.
    */
   void requestRedraw() {
     if (_redrawRequested.exchange(true)) {
@@ -170,12 +171,12 @@ public:
    Present thread. Presents everything submitted since the last frame; with
    nothing queued, presents the last frame again (a redraw after a resize or
    on a new surface). Without a surface the queue is left alone: the surface
-   presents it when it appears. While the window cannot show a frame (the
-   app in the background, see RNSkWindowSurface::setCanPresent) nothing is
-   replayed either: the redraw stays requested, and onCanPresent() schedules
-   it again. A frame the window could not take (no drawable) is queued again
-   and handed to the frame scheduler, which tries it on the view's next frame
-   (see setFrameScheduler).
+   presents it when it appears. While the window cannot show a frame (see
+   RNSkWindowSurface::canPresent) nothing is replayed either: the redraw
+   stays requested, and requestDeclinedFrame() schedules it again. A frame
+   the window could not take (no drawable) is queued again and handed to the
+   frame scheduler, which tries it on the view's next frame (see
+   setFrameScheduler).
    */
   void redraw() {
     RNSkGraphiteTargetInfo targetInfo;
@@ -335,8 +336,8 @@ public:
    not take one (no drawable), so that it is tried again on the next frame
    rather than left waiting for a redraw. Without a surface the queue is
    left alone: the surface presents it when it appears. While the window
-   cannot show a frame (the app in the background) the queue is left alone
-   too, and nobody asks again before onCanPresent().
+   cannot show a frame (see RNSkWindowSurface::canPresent) the queue is left
+   alone too, and nobody asks again before requestDeclinedFrame().
    */
   int presentFrame() {
     auto target = getTarget();
@@ -364,19 +365,36 @@ public:
 
   /**
    Main thread. The window can show frames again (the app came back to the
-   foreground, see RNSkWindowSurface::setCanPresent): a redraw it could not
-   show is scheduled again, else the recordings queued meanwhile are handed
-   to the frame scheduler. Nothing is replayed on the spot. A GPU device
-   lost in the background (where iOS refuses GPU work) is replaced now that
-   the app is back, and the view is asked for a frame once it is.
+   foreground, see RNSkWindowSurface::setCanPresent): what it could not show
+   meanwhile is asked for again (see requestDeclinedFrame). A GPU device lost
+   in the background (where iOS refuses GPU work) is replaced now that the
+   app is back, and the view is asked for a frame once it is.
    */
   void onCanPresent() {
     DawnContext::requestRecovery();
-    if (_redrawRequested) {
-      postRedraw();
-    } else if (hasQueuedRecordings()) {
-      scheduleFrame();
-    }
+    requestDeclinedFrame();
+  }
+
+  /**
+   The window can show frames again (see onCanPresent, and
+   RNSkWindowSurface::setPresentsHeld): on the present thread, a redraw it
+   could not show is presented, else the recordings queued meanwhile are
+   handed to the frame scheduler. Nothing is presented on the spot. Any
+   thread.
+   */
+  void requestDeclinedFrame() {
+    std::weak_ptr<RNSkView> weakThis = weak_from_this();
+    _runOnPresentThread([weakThis]() {
+      auto view = weakThis.lock();
+      if (!view) {
+        return;
+      }
+      if (view->_redrawRequested) {
+        view->redraw();
+      } else if (view->hasQueuedRecordings()) {
+        view->scheduleFrame();
+      }
+    });
   }
 
   bool hasQueuedRecordings() {

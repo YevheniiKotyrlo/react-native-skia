@@ -47,7 +47,9 @@ public:
                           JniSkiaView::setSurfaceHighBitDepth),
          makeNativeMethod("registerView", JniSkiaView::registerView),
          makeNativeMethod("unregisterView", JniSkiaView::unregisterView),
-         makeNativeMethod("presentFrame", JniSkiaView::presentFrame)});
+         makeNativeMethod("presentFrame", JniSkiaView::presentFrame),
+         makeNativeMethod("holdPresents", JniSkiaView::holdPresents),
+         makeNativeMethod("releasePresents", JniSkiaView::releasePresents)});
   }
 
   // The manager is owned by the RNSkiaModule and is destroyed when the module
@@ -131,6 +133,22 @@ protected:
   // and whether more are waiting (see RNSkView::presentFrame). The Java view
   // keeps this object alive for the call (see SkiaView.dropInstance).
   int presentFrame() { return _view->presentFrame(); }
+
+  // Main thread. The backing view's layer would show a frame before the
+  // window frame that lays it out: nothing is presented until
+  // releasePresents().
+  void holdPresents() { _surface->setPresentsHeld(true); }
+
+  // Main thread. The window frame has committed, or the surface is gone: what
+  // an attached window declined meanwhile, a redraw or the queued recordings,
+  // is asked for again on the present thread (see
+  // RNSkView::requestDeclinedFrame).
+  void releasePresents() {
+    _surface->setPresentsHeld(false);
+    if (_surface->isAttached()) {
+      _view->requestDeclinedFrame();
+    }
+  }
 
 private:
   friend HybridBase;
