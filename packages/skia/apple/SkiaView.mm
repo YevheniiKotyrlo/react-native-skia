@@ -40,6 +40,13 @@ static bool appIsBackgrounded() {
 #endif // !TARGET_OS_OSX
 }
 
+// Whether the view asks for another frame after a present: one is left, or a
+// replay is coming.
+static bool asksForAnotherFrame(int presented) {
+  return (presented & (RNSkia::RNSkView::kMoreQueued |
+                       RNSkia::RNSkView::kReplayComing)) != 0;
+}
+
 @implementation SkiaView {
   // The native view, the window surface and the layer it presents into. All
   // three exist while the view is in the hierarchy (see willMoveToSuperview:).
@@ -128,7 +135,10 @@ static bool appIsBackgrounded() {
 #pragma clang diagnostic ignored "-Wunguarded-availability-new"
   _layer = [CAMetalLayer layer];
 #pragma clang diagnostic pop
-  _surface = std::make_shared<RNSkia::RNSkWindowSurface>();
+  // A Metal present does not wait for the GPU: frames go as soon as they are
+  // replayed.
+  _surface =
+      std::make_shared<RNSkia::RNSkWindowSurface>(RNSkia::PresentHold::kNone);
   _surface->setHighBitDepth(_highBitDepth);
   // The window belongs to the main thread, and is left alone while the app
   // is in the background: what the view holds is presented on its next frame
@@ -212,10 +222,11 @@ static bool appIsBackgrounded() {
 #pragma mark - Frames
 
 // Presents on the display link: armed when a recording is submitted, paused
-// again once the queue is empty. macOS has no CADisplayLink on the minimum
-// deployment target, so frames are presented as soon as the main thread gets
-// to them there, and tried again a frame later while some are left (more were
-// submitted meanwhile, or the window could not take one).
+// again once nothing is waiting or coming. macOS has no CADisplayLink on the
+// minimum deployment target, so frames are presented as soon as the main
+// thread gets to them there, and again a frame later while one is left (more
+// were submitted meanwhile, or the window could not take one) or a replay is
+// coming.
 - (void)scheduleFrame {
 #if !TARGET_OS_OSX
   if (_displayLink == nil) {
@@ -227,10 +238,7 @@ static bool appIsBackgrounded() {
   [self requestFullFrameRate];
   _displayLink.paused = NO;
 #else
-  if (_view != nullptr &&
-      (_view->presentFrame() & RNSkia::RNSkView::kMoreQueued)) {
-    [self presentAgainLater];
-  }
+  [self presentFrameWithTicks:0];
 #endif
 }
 
@@ -240,8 +248,8 @@ static bool appIsBackgrounded() {
 // a 120 Hz producer would then be presented every other frame. Ask for the
 // display's full rate once the view knows its screen. On iPhone this needs
 // CADisableMinimumFrameDurationOnPhone in the app's Info.plist too, else iOS
-// caps every link at 60 Hz. The link is paused while nothing is queued, so an
-// idle view does not keep the display at its full rate.
+// caps every link at 60 Hz. The link is paused while nothing is waiting or
+// coming, so an idle view does not keep the display at its full rate.
 - (void)requestFullFrameRate {
 #if !TARGET_OS_VISION
   if (_fullFrameRateRequested) {
@@ -261,12 +269,17 @@ static bool appIsBackgrounded() {
 }
 
 - (void)onFrame:(CADisplayLink *)link {
-  if (_view == nullptr ||
-      !(_view->presentFrame() & RNSkia::RNSkView::kMoreQueued)) {
+  if (_view == nullptr || !asksForAnotherFrame(_view->presentFrame(1))) {
     link.paused = YES;
   }
 }
 #else
+- (void)presentFrameWithTicks:(size_t)ticks {
+  if (_view != nullptr && asksForAnotherFrame(_view->presentFrame(ticks))) {
+    [self presentAgainLater];
+  }
+}
+
 - (void)presentAgainLater {
   if (_presentAgainScheduled) {
     return;
@@ -280,7 +293,7 @@ static bool appIsBackgrounded() {
                      return;
                    }
                    strongSelf->_presentAgainScheduled = false;
-                   [strongSelf scheduleFrame];
+                   [strongSelf presentFrameWithTicks:1];
                  });
 }
 #endif

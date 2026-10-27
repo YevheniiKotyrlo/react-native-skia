@@ -84,13 +84,13 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
         }
 
         @Override
-        public int presentFrame() {
+        public int presentFrame(int ticks) {
             int result;
             synchronized (mNativeLock) {
                 if (!hasNativeView()) {
                     return 0;
                 }
-                result = SkiaView.this.presentFrame();
+                result = SkiaView.this.presentFrame(ticks);
             }
             // Only a SurfaceView votes (attached in onSurfaceCreated): a
             // TextureView is composited into its window, which votes for it.
@@ -98,6 +98,13 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
                 mFrameRateVote.onFramePresented();
             }
             return result;
+        }
+
+        @Override
+        public int tick() {
+            synchronized (mNativeLock) {
+                return hasNativeView() ? SkiaView.this.tick() : 0;
+            }
         }
     });
 
@@ -471,11 +478,19 @@ public class SkiaView extends ReactViewGroup implements SkiaViewAPI, Choreograph
     private native void unregisterView();
 
     /**
-     * Presents the queued recordings: FrameScheduler.PRESENTED when a frame
-     * went to the window, FrameScheduler.MORE_QUEUED when recordings are left.
-     * Present thread, under mNativeLock.
+     * Presents what is waiting after ticks ticks: FrameScheduler.PRESENTED when
+     * a frame went to the window, FrameScheduler.MORE_QUEUED when one is left,
+     * FrameScheduler.REPLAY_COMING when a replay is in flight. Present thread,
+     * under mNativeLock.
      */
-    private native int presentFrame();
+    private native int presentFrame(int ticks);
+
+    /**
+     * Counts a tick while the window has yet to draw its frame:
+     * FrameScheduler.REPLAY_COMING when a replay is in flight. Present thread,
+     * under mNativeLock.
+     */
+    private native int tick();
 
     private native void holdPresents();
 
