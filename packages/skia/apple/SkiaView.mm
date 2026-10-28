@@ -322,7 +322,6 @@ static bool appIsBackgrounded() {
 #if !TARGET_OS_OSX
   [_displayLink invalidate];
   _displayLink = nil;
-  _fullFrameRateRequested = false;
 #endif
 }
 
