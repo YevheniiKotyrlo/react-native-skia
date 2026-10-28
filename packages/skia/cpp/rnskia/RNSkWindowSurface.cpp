@@ -329,19 +329,33 @@ bool RNSkWindowSurface::surfaceSupportsFormat(wgpu::TextureFormat format) {
   return false;
 }
 
-bool RNSkWindowSurface::canPresent() {
+RNSkWindowState RNSkWindowSurface::readState(RNSkGraphiteTargetInfo *info) {
   std::lock_guard<std::mutex> lock(_mutex);
-  return canPresentLocked();
+  return readStateLocked(info);
 }
 
-bool RNSkWindowSurface::canPresentLocked() {
+RNSkWindowState
+RNSkWindowSurface::readStateLocked(RNSkGraphiteTargetInfo *info) {
+  // Whether a window is attached is its handle, not its description, which
+  // detachLocked takes once more before it lets go of the window.
+  if (_nativeHandle == nullptr) {
+    return RNSkWindowState::kNone;
+  }
   // A lost device (see DawnContext::isDeviceLost) takes no frame until it
-  // is replaced: the view keeps its last one and the queue waits, as while
-  // in the background. A window whose surface is away for the replacement
-  // (see ensureDeviceLocked) can: presenting is what brings the surface
-  // back.
-  return _nativeHandle != nullptr && !DawnContext::isDeviceLost() &&
-         (!_canPresent || _canPresent());
+  // is replaced: the view keeps its last one and the queue waits. A window
+  // whose surface is away for the replacement (see ensureDeviceLocked) is
+  // ready: presenting is what brings the surface back.
+  if (DawnContext::isDeviceLost()) {
+    return RNSkWindowState::kNoDevice;
+  }
+  if (_canPresent && !_canPresent()) {
+    return RNSkWindowState::kCannotPresent;
+  }
+  if (info != nullptr) {
+    std::lock_guard<std::mutex> infoLock(_targetInfoMutex);
+    *info = _targetInfo;
+  }
+  return RNSkWindowState::kReady;
 }
 
 bool RNSkWindowSurface::isTargetLocked(const RNSkGraphiteTargetInfo &target) {
@@ -423,7 +437,8 @@ bool RNSkWindowSurface::presentRecordings(
   retireReplacedDevice();
   std::lock_guard<std::mutex> lock(_mutex);
   // The device check first: it may configure the window again.
-  if (!canPresentLocked() || !ensureDeviceLocked() || !isTargetLocked(target)) {
+  if (readStateLocked(nullptr) != RNSkWindowState::kReady ||
+      !ensureDeviceLocked() || !isTargetLocked(target)) {
     return false;
   }
   configureIfNeededLocked();
@@ -462,7 +477,8 @@ bool RNSkWindowSurface::presentImage(const RNSkGraphiteTargetInfo &target,
                                      const sk_sp<SkImage> &image) {
   retireReplacedDevice();
   std::lock_guard<std::mutex> lock(_mutex);
-  if (!canPresentLocked() || !ensureDeviceLocked() || !isTargetLocked(target)) {
+  if (readStateLocked(nullptr) != RNSkWindowState::kReady ||
+      !ensureDeviceLocked() || !isTargetLocked(target)) {
     return false;
   }
   configureIfNeededLocked();

@@ -8,6 +8,7 @@
 
 #include "RNSkGraphiteTargetInfo.h"
 #include "RNSkSurface.h"
+#include "RNSkWindowState.h"
 
 #include "webgpu/webgpu_cpp.h"
 
@@ -168,11 +169,12 @@ public:
   }
 
   /**
-   Whether a window is attached and can show a frame right now: not while
-   the platform view says it cannot, nor once the GPU device is lost. Any
-   thread.
+   What a frame presented now would meet, read at once under the mutex: no
+   window, no GPU device (lost, and not replaced yet), a window that cannot
+   show a frame (the platform view says so, see setCanPresent), or one ready
+   for a frame, which `info`, when given, then describes. Any thread.
    */
-  bool canPresent();
+  RNSkWindowState readState(RNSkGraphiteTargetInfo *info);
 
   // RNSkSurface -------------------------------------------------------------
 
@@ -211,9 +213,8 @@ private:
   // Lets go of the Dawn surface and the window; see detach(). Called with
   // the mutex held.
   void detachLocked();
-  // Whether a window is attached and can show a frame (see canPresent()).
-  // Called with the mutex held.
-  bool canPresentLocked();
+  // readState(), called with the mutex held.
+  RNSkWindowState readStateLocked(RNSkGraphiteTargetInfo *info);
   // Whether the window is the target the caller read (see getTargetInfo):
   // as it is, or as resize() noted it should be (the size is taken then,
   // see takePendingSizeLocked). It is neither when the main thread resized
