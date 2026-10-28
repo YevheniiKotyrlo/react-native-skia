@@ -4,7 +4,6 @@ import type { Fiber, HostConfig, ReactContext } from "react-reconciler";
 import { DefaultEventPriority } from "react-reconciler/constants";
 
 import { NodeType } from "../dom/types";
-import { shallowEq } from "../renderer/typeddash";
 
 import type { Node } from "./Node";
 import type { Container } from "./StaticContainer";
@@ -187,16 +186,12 @@ export const sksgHostConfig: SkiaHostConfig = {
   cloneInstance(
     instance,
     _type,
-    oldProps,
+    _oldProps,
     newProps,
     keepChildren,
     _newChildSet
   ) {
     debug("cloneInstance");
-    // React keeps the instance unchanged when cloneInstance returns it.
-    if (keepChildren && shallowEq(oldProps, newProps)) {
-      return instance;
-    }
     return {
       type: instance.type,
       props: { ...newProps },
