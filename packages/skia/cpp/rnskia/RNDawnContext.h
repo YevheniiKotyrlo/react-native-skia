@@ -15,7 +15,6 @@
 #include <thread>
 #include <unordered_map>
 #include <utility>
-#include <variant>
 #include <vector>
 
 #if defined(__APPLE__)
@@ -26,9 +25,7 @@
 
 #include "RNDawnUtils.h"
 #include "RNImageProvider.h"
-#include "RNSkMemoryReleaseSchedule.h"
 #include "utils/RNSkLog.h"
-#include "utils/RNSkOverloaded.h"
 
 #include "include/core/SkColorSpace.h"
 #include "include/core/SkData.h"
@@ -252,22 +249,10 @@ public:
    */
   void readPixels(const sk_sp<SkImage> &image, const SkIRect &srcRect,
                   std::function<void(ReadResult)> callback) {
-    readPixels(image, srcRect,
-               image->imageInfo().makeDimensions(srcRect.size()),
-               std::move(callback));
-  }
-
-  /**
-   Same as readPixels(), into `info`: a color type, alpha type or color space
-   of the caller's rather than the image's, and the size of `srcRect` or a
-   smaller one, which the GPU scales the pixels down to.
-   */
-  void readPixels(const sk_sp<SkImage> &image, const SkIRect &srcRect,
-                  const SkImageInfo &info,
-                  std::function<void(ReadResult)> callback) {
     struct Request {
       std::function<void(ReadResult)> callback;
     };
+    auto info = image->imageInfo().makeDimensions(srcRect.size());
     {
       std::unique_lock<std::mutex> lock(_mutex);
       auto *current = _current.load(std::memory_order_acquire);
@@ -279,10 +264,9 @@ public:
       }
       auto *request = new Request{std::move(callback)};
       _pendingReadbacks.fetch_add(1, std::memory_order_acq_rel);
-      // Graphite ignores the mode when `info` has the size of `srcRect`.
       current->context->asyncRescaleAndReadPixels(
           image.get(), info, srcRect, SkImage::RescaleGamma::kSrc,
-          SkImage::RescaleMode::kRepeatedLinear,
+          SkImage::RescaleMode::kNearest,
           [](void *context, ReadResult result) {
             auto *request = static_cast<Request *>(context);
             getInstance()._pendingReadbacks.fetch_sub(
@@ -291,7 +275,7 @@ public:
             delete request;
           },
           request);
-      submitLocked(current, skgpu::graphite::SyncToCpu::kNo);
+      current->context->submit();
     }
     wakeGpuThread();
   }
@@ -453,26 +437,6 @@ public:
   }
 
   /**
-   Asks for the GPU memory Dawn keeps for reuse to be given back: the heaps
-   of the textures and buffers freed since, which it releases only when asked
-   (a static canvas frees a texture with each frame it presents; a render
-   thread once idle asks, see RNSkGraphiteProducer). The GPU thread gives it
-   back once the device ran no work for kMemoryReleaseIdleTime, between
-   frames (see RNSkMemoryReleaseSchedule). Any thread; returns at once.
-   */
-  static void requestMemoryRelease() {
-    auto *instance = tryGetInstance();
-    if (instance == nullptr) {
-      return;
-    }
-    {
-      std::lock_guard<std::mutex> lock(instance->_gpuMutex);
-      instance->_memoryRelease.requested();
-    }
-    instance->wakeGpuThread();
-  }
-
-  /**
    Snaps what the recorder recorded and runs it on the GPU. `recorder` is a
    thread's (see getRecorder), also behind the surfaces made on it; any
    other submits nothing. A recording made for a lost device (see
@@ -509,7 +473,7 @@ public:
               static_cast<skgpu::graphite::InsertStatus::V>(status)),
           status.message().c_str());
     }
-    submitLocked(current, syncToCpu);
+    current->context->submit(syncToCpu);
     return inserted;
   }
 
@@ -542,7 +506,7 @@ public:
             status.message().c_str());
       }
     }
-    submitLocked(current, skgpu::graphite::SyncToCpu::kNo);
+    current->context->submit();
   }
 
   /**
@@ -675,13 +639,6 @@ public:
   // to sample it from WebGPU (e.g. as a three.js texture) after each flush.
   // The surface retains the texture for its lifetime.
   sk_sp<SkSurface> MakeSurfaceFromTexture(wgpu::Texture texture) {
-    return MakeSurfaceFromTexture(std::move(texture), getRecorder(), nullptr);
-  }
-
-  // The same, on `recorder` and in `colorSpace`.
-  sk_sp<SkSurface> MakeSurfaceFromTexture(wgpu::Texture texture,
-                                          skgpu::graphite::Recorder *recorder,
-                                          sk_sp<SkColorSpace> colorSpace) {
     if (!texture) {
       return nullptr;
     }
@@ -700,7 +657,8 @@ public:
 
     // The color type is derived from the texture format.
     return SkSurfaces::WrapBackendTexture(
-        recorder, backendTexture, std::move(colorSpace),
+        getRecorder(), backendTexture,
+        nullptr, // colorspace
         nullptr, // surfaceProps
         [](void *context) {
           auto ref = static_cast<TextureRef *>(context);
@@ -908,9 +866,8 @@ private:
   // The GPU thread ------------------------------------------------------------
 
   // The thread that creates every device and Graphite context, the probe's
-  // and each replacement of a lost device (see scheduleRecovery), polls the
-  // context while readbacks are pending (see readPixels) and gives back the
-  // memory Dawn keeps for reuse (see requestMemoryRelease), for the life of
+  // and each replacement of a lost device (see scheduleRecovery), and polls
+  // the context while readbacks are pending (see readPixels), for the life of
   // the process: it never exits. The Vulkan driver of the Android 10 and 11
   // emulator images keeps a command buffer with the command stream of the
   // thread that last recorded into it, and crashes when another thread
@@ -950,127 +907,47 @@ private:
   }
 
   /**
-   The GPU thread's work once the context exists, for the life of the
-   process: a replacement of a lost device once its backoff allows (see
-   scheduleRecovery); while readbacks are pending, a check of the context for
-   finished GPU work every few milliseconds (see readPixels); and a memory
-   release asked for, when its schedule says, between frames (see
-   RNSkMemoryReleaseSchedule). It sleeps otherwise.
+   The GPU thread's work once the context exists: a replacement of a lost
+   device once its backoff allows (see scheduleRecovery), and the polling
+   of the context while readbacks are pending (see readPixels).
    */
   void serveGpuWork() {
-    using Release = RNSkMemoryReleaseSchedule;
-    // Polls every millisecond at first, then backs off: a short readback is
-    // delivered quickly, a long one does not take the context lock a
-    // thousand times a second.
-    auto interval = std::chrono::milliseconds(1);
+    for (;;) {
+      if (auto recovery = awaitGpuWork()) {
+        recover(recovery->lost);
+      } else {
+        pollReadbacks();
+      }
+    }
+  }
+
+  /**
+   Waits until a readback is pending or the scheduled recovery is due, and
+   hands over the recovery when that is what came due.
+   */
+  std::optional<ScheduledRecovery> awaitGpuWork() {
     std::unique_lock<std::mutex> lock(_gpuMutex);
     for (;;) {
       if (_scheduledRecovery.has_value() &&
           std::chrono::steady_clock::now() >= _scheduledRecovery->due) {
-        auto *lost = std::exchange(_scheduledRecovery, std::nullopt)->lost;
-        lock.unlock();
-        recover(lost);
-        lock.lock();
-        continue;
+        return std::exchange(_scheduledRecovery, std::nullopt);
       }
-      const bool readbacks =
-          _pendingReadbacks.load(std::memory_order_acquire) > 0;
-      std::optional<Release::RunRound> release;
-      const bool waited = std::visit(
-          Overloaded{[&](const Release::WaitForRequest &) {
-                       if (!readbacks) {
-                         waitForGpuWork(lock, std::nullopt);
-                       }
-                       return !readbacks;
-                     },
-                     [&](const Release::WaitUntil &wait) {
-                       if (!readbacks) {
-                         waitForGpuWork(lock, wait.time);
-                       }
-                       return !readbacks;
-                     },
-                     [&](const Release::RunRound &round) {
-                       release = round;
-                       return false;
-                     }},
-          _memoryRelease.next(lastSubmit(), std::chrono::steady_clock::now()));
-      if (waited) {
-        interval = std::chrono::milliseconds(1);
-        continue;
+      if (_pendingReadbacks.load(std::memory_order_acquire) > 0) {
+        return std::nullopt;
       }
-      lock.unlock();
-      bool polled = false;
-      auto round = Release::Round::kBusy;
-      {
-        // A busy context is a view rendering: skip this round rather than
-        // hold up its frame.
-        std::unique_lock<std::mutex> contextLock(_mutex, std::try_to_lock);
-        if (contextLock.owns_lock()) {
-          polled = true;
-          tick();
-          _current.load(std::memory_order_acquire)
-              ->context->checkAsyncWorkCompletion();
-          // A readback requested on a device lost since is failed by Dawn;
-          // its context delivers that like any other result.
-          for (auto *retired : _retired) {
-            retired->context->checkAsyncWorkCompletion();
-          }
-          if (release.has_value()) {
-            round = dawn::native::ReduceMemoryUsage(getWGPUDevice().Get())
-                        ? Release::Round::kAgain
-                        : Release::Round::kDone;
-          }
-        }
-      }
-      if (readbacks) {
-        if (polled) {
-          interval = std::min(interval * 2, std::chrono::milliseconds(4));
-        }
-        std::this_thread::sleep_for(interval);
-      }
-      lock.lock();
-      if (release.has_value()) {
-        _memoryRelease.ranRound(*release, round,
-                                std::chrono::steady_clock::now());
+      if (_scheduledRecovery.has_value()) {
+        const auto due = _scheduledRecovery->due;
+        _gpuCondition.wait_until(lock, due);
+      } else {
+        _gpuCondition.wait(lock);
       }
     }
   }
 
-  /**
-   Waits for a notification (see wakeGpuThread) under _gpuMutex, until
-   `until` when given, and no later than the scheduled recovery comes due.
-   */
-  void waitForGpuWork(
-      std::unique_lock<std::mutex> &lock,
-      std::optional<std::chrono::steady_clock::time_point> until) {
-    if (_scheduledRecovery.has_value() &&
-        (!until.has_value() || _scheduledRecovery->due < *until)) {
-      until = _scheduledRecovery->due;
-    }
-    if (until.has_value()) {
-      _gpuCondition.wait_until(lock, *until);
-    } else {
-      _gpuCondition.wait(lock);
-    }
-  }
-
-  /** When Skia last submitted work to the device (see submitLocked). */
-  std::chrono::steady_clock::time_point lastSubmit() const {
-    return std::chrono::steady_clock::time_point(
-        std::chrono::steady_clock::duration(
-            _lastSubmit.load(std::memory_order_relaxed)));
-  }
-
-  /**
-   Submits what the context holds, and notes when: a memory release waits
-   for the device to run nothing for a time (see RNSkMemoryReleaseSchedule).
-   Under the context lock.
-   */
-  void submitLocked(Generation *current, skgpu::graphite::SyncToCpu syncToCpu) {
-    current->context->submit(syncToCpu);
-    _lastSubmit.store(
-        std::chrono::steady_clock::now().time_since_epoch().count(),
-        std::memory_order_relaxed);
+  bool isRecoveryDue() {
+    std::lock_guard<std::mutex> lock(_gpuMutex);
+    return _scheduledRecovery.has_value() &&
+           std::chrono::steady_clock::now() >= _scheduledRecovery->due;
   }
 
   // Taken so that a GPU thread between its checks and its wait cannot miss
@@ -1371,6 +1248,37 @@ private:
     _recorders.erase(recorder);
   }
 
+  // Readbacks ----------------------------------------------------------------
+
+  /**
+   Polls the context on the GPU thread while readbacks are pending, until
+   none is or the scheduled recovery comes due: every millisecond at first,
+   then backing off, so that a short readback is delivered quickly and a
+   long one does not take the context lock a thousand times a second.
+   */
+  void pollReadbacks() {
+    auto interval = std::chrono::milliseconds(1);
+    while (_pendingReadbacks.load(std::memory_order_acquire) > 0 &&
+           !isRecoveryDue()) {
+      // A busy context is a view rendering: skip this round rather than hold
+      // up its frame.
+      std::unique_lock<std::mutex> lock(_mutex, std::try_to_lock);
+      if (lock.owns_lock()) {
+        tick();
+        _current.load(std::memory_order_acquire)
+            ->context->checkAsyncWorkCompletion();
+        // A readback requested on a device lost since is failed by Dawn; its
+        // context delivers that like any other result.
+        for (auto *retired : _retired) {
+          retired->context->checkAsyncWorkCompletion();
+        }
+        lock.unlock();
+        interval = std::min(interval * 2, std::chrono::milliseconds(4));
+      }
+      std::this_thread::sleep_for(interval);
+    }
+  }
+
   /**
    Lets the GPU work that finished release its resources (command buffers
    hold on to what they use until the context sees them done), and Dawn run
@@ -1460,26 +1368,10 @@ private:
   // The readbacks the GPU thread polls the context for (see readPixels).
   std::atomic<int> _pendingReadbacks{0};
 
-  // The memory release's schedule, which _gpuMutex guards (see
-  // requestMemoryRelease), and when Skia last submitted work to the device.
-  // The device counts as idle once it ran nothing for kMemoryReleaseIdleTime:
-  // a view drawing frames at any rate it animates at submits more often. What
-  // others submit on the shared device, react-native-webgpu's work, is not
-  // seen; Dawn saying more remains round after round is, up to
-  // kMemoryReleaseRounds.
-  static constexpr std::chrono::milliseconds kMemoryReleaseIdleTime{1000};
-  static constexpr std::chrono::milliseconds kMemoryReleaseRoundInterval{10};
-  static constexpr int kMemoryReleaseRounds = 20;
-  RNSkMemoryReleaseSchedule _memoryRelease{kMemoryReleaseIdleTime,
-                                           kMemoryReleaseRoundInterval,
-                                           kMemoryReleaseRounds};
-  std::atomic<std::chrono::steady_clock::rep> _lastSubmit{0};
-
-  // What wakes the GPU thread: a pending readback, a memory release asked for,
-  // or the replacement of a lost device it runs once due (see
-  // scheduleRecovery), guarded by _gpuMutex. Taken by Dawn's loss callback,
-  // possibly inside a Context operation: never wait for _mutex or _lostMutex
-  // while holding it.
+  // What wakes the GPU thread: a pending readback, or the replacement of a
+  // lost device it runs once due (see scheduleRecovery), guarded by
+  // _gpuMutex. Taken by Dawn's loss callback, possibly inside a Context
+  // operation: never wait for _mutex or _lostMutex while holding it.
   std::mutex _gpuMutex;
   std::condition_variable _gpuCondition;
   std::optional<ScheduledRecovery> _scheduledRecovery;

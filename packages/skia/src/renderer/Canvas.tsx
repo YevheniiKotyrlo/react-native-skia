@@ -71,15 +71,6 @@ export interface CanvasProps extends ViewProps {
    */
   highBitDepth?: boolean;
   /**
-   * Draws each frame into an image that a plain view shows, with no surface,
-   * swapchain or display link of its own: the canvas mounts and unmounts at
-   * the cost of a view. A change of its content draws it again the same way,
-   * through a readback, so it suits content that changes rarely. Read once,
-   * when the canvas mounts; it takes precedence over `android.backingView`
-   * and `highBitDepth`.
-   */
-  static?: boolean;
-  /**
    * Android-only rendering options: the native view behind the canvas and its
    * options, see {@link AndroidCanvasProps}. The view is created when the
    * canvas mounts and kept: a change of `backingView` is ignored, with a
@@ -172,20 +163,18 @@ const useCanvasRoot = ({
 export const Canvas = ({
   children,
   highBitDepth = false,
-  static: staticPresentation = false,
   android,
   ref,
   ...viewProps
 }: CanvasProps) => {
   const { nativeId, viewRef } = useCanvasRoot({ children, ref });
-  useBackingViewWarning({ highBitDepth, android, static: staticPresentation });
+  useBackingViewWarning({ highBitDepth, android });
   return (
     <SkiaViewNativeComponent
       ref={viewRef}
       collapsable={false}
       nativeID={`${nativeId}`}
       highBitDepth={highBitDepth}
-      staticPresentation={staticPresentation}
       {...androidNativeProps(android)}
       {...viewProps}
     />
