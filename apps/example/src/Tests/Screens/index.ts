@@ -1,5 +1,6 @@
 import type { FC } from "react";
 
+import { AnimatedCanvas } from "./AnimatedCanvas";
 import {
   ClippedSubviewsBack,
   ClippedSubviewsDeviceLost,
@@ -28,6 +29,7 @@ const settling = (component: FC): Screen => ({
 });
 
 export const Screens: Readonly<Record<string, Screen>> = {
+  AnimatedCanvas: shown(AnimatedCanvas),
   ClippedSubviewsBack: settling(ClippedSubviewsBack),
   ClippedSubviewsDeviceLost: settling(ClippedSubviewsDeviceLost),
   ClippedSubviewsSharedValueChanged: settling(
