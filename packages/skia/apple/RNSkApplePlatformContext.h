@@ -9,7 +9,10 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "RNSkPlatformContext.h"
 
@@ -23,14 +26,9 @@ namespace RNSkia {
 
 class RNSkApplePlatformContext : public RNSkPlatformContext {
 public:
-  RNSkApplePlatformContext(
+  explicit RNSkApplePlatformContext(
       std::shared_ptr<facebook::react::CallInvoker> jsCallInvoker)
-#if !TARGET_OS_OSX
-      : RNSkPlatformContext(jsCallInvoker, [[UIScreen mainScreen] scale]) {
-#else
-      : RNSkPlatformContext(jsCallInvoker,
-                            [[NSScreen mainScreen] backingScaleFactor]) {
-#endif // !TARGET_OS_OSX
+      : RNSkPlatformContext(std::move(jsCallInvoker), mainScreenScale()) {
     _prefersP3ColorSpace = mainScreenSupportsP3();
   }
 
@@ -58,7 +56,7 @@ public:
 
   void runOnMainThread(std::function<void()>) override;
 
-  virtual void performStreamOperation(
+  void performStreamOperation(
       const std::string &sourceUri,
       const std::function<void(std::unique_ptr<SkStreamAsset>)> &op) override;
 
@@ -72,7 +70,24 @@ public:
 
   std::string resolveFontFamily(const std::string &familyName) override;
 
+  std::optional<PresentedTarget>
+  makePresentedTarget(const SkImageInfo &info) override;
+
+  bool canPresentP3Bitmaps() override { return true; }
+
+  void discardPresentedBitmap(uint32_t id) override;
+
+  void presentFailure(uint32_t id) override;
+
 private:
+  static float mainScreenScale() {
+#if !TARGET_OS_OSX
+    return [[UIScreen mainScreen] scale];
+#else
+    return [[NSScreen mainScreen] backingScaleFactor];
+#endif // !TARGET_OS_OSX
+  }
+
   bool _prefersP3ColorSpace = false;
 };
 

@@ -1,11 +1,19 @@
 #import "RNSkApplePlatformContext.h"
 
+#import <CoreVideo/CoreVideo.h>
+#import <IOSurface/IOSurfaceRef.h>
+#import <Metal/Metal.h>
+#include <mach/kern_return.h>
+
 #import <React/RCTUtils.h>
+#include <chrono>
+#include <cstdlib>
 #include <set>
 #include <thread>
 #include <utility>
 
 #include "RNDawnContext.h"
+#import "SkiaPresentedImages.h"
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdocumentation"
@@ -190,6 +198,171 @@ void RNSkApplePlatformContext::observeApplicationState() {
 void RNSkApplePlatformContext::runOnMainThread(std::function<void()> func) {
   dispatch_async(dispatch_get_main_queue(), ^{
     func();
+  });
+}
+
+namespace {
+
+// A CGImage the image views show (see RNSkPresentedImages). Presents, failures
+// and discards are queued on the main queue in the order they are made.
+class ApplePresentedBitmap : public PresentedBitmap {
+public:
+  // Takes ownership of `image`.
+  explicit ApplePresentedBitmap(CGImageRef image) : _image(image) {}
+
+  ~ApplePresentedBitmap() override { CGImageRelease(_image); }
+
+  void present(uint32_t id) override {
+    CGImageRef image = CGImageRetain(_image);
+    dispatch_async(dispatch_get_main_queue(), ^{
+      [SkiaPresentedImages publishImage:image forId:id];
+      CGImageRelease(image);
+    });
+  }
+
+private:
+  CGImageRef _image;
+};
+
+// An IOSurface a presented image is drawn into once (see PresentedBuffer),
+// shown as a CGImage over the surface's own memory, which stays locked for
+// reading while the image lives.
+class ApplePresentedBuffer : public PresentedBuffer {
+public:
+  // Takes ownership of `surface`, drawn in Display P3 or in sRGB.
+  ApplePresentedBuffer(IOSurfaceRef surface, bool displayP3)
+      : _surface(surface), _displayP3(displayP3) {}
+
+  ~ApplePresentedBuffer() override { CFRelease(_surface); }
+
+  ApplePresentedBuffer(const ApplePresentedBuffer &) = delete;
+  ApplePresentedBuffer &operator=(const ApplePresentedBuffer &) = delete;
+
+  wgpu::SharedTextureMemory import(const wgpu::Device &device) override {
+    wgpu::SharedTextureMemoryIOSurfaceDescriptor ioSurface{};
+    ioSurface.ioSurface = _surface;
+    ioSurface.allowStorageBinding = false;
+    wgpu::SharedTextureMemoryDescriptor descriptor{};
+    descriptor.nextInChain = &ioSurface;
+    return device.ImportSharedTextureMemory(&descriptor);
+  }
+
+  // Each fence is an MTLSharedEvent that reaches its value once the GPU is
+  // done.
+  bool waitForFences(const std::vector<wgpu::SharedFence> &fences,
+                     const std::vector<uint64_t> &signaledValues,
+                     std::chrono::milliseconds timeout) override {
+    const auto deadline = dispatch_time(
+        DISPATCH_TIME_NOW,
+        std::chrono::duration_cast<std::chrono::nanoseconds>(timeout).count());
+    for (size_t i = 0; i < fences.size(); i++) {
+      wgpu::SharedFenceMTLSharedEventExportInfo sharedEvent{};
+      wgpu::SharedFenceExportInfo info{};
+      info.nextInChain = &sharedEvent;
+      fences[i].ExportInfo(&info);
+      if (info.type != wgpu::SharedFenceType::MTLSharedEvent ||
+          sharedEvent.sharedEvent == nullptr) {
+        return false;
+      }
+      id<MTLSharedEvent> event =
+          (__bridge id<MTLSharedEvent>)sharedEvent.sharedEvent;
+      const uint64_t value = i < signaledValues.size() ? signaledValues[i] : 0;
+      if (event.signaledValue >= value) {
+        continue;
+      }
+      dispatch_semaphore_t signaled = dispatch_semaphore_create(0);
+      [event notifyListener:sharedEventListener()
+                    atValue:value
+                      block:^(id<MTLSharedEvent>, uint64_t) {
+                        dispatch_semaphore_signal(signaled);
+                      }];
+      if (dispatch_semaphore_wait(signaled, deadline) != 0) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  std::shared_ptr<PresentedBitmap> finish() override {
+    if (IOSurfaceLock(_surface, kIOSurfaceLockReadOnly, nullptr) !=
+        KERN_SUCCESS) {
+      return nullptr;
+    }
+    // The image's provider holds the surface, locked, until the image goes.
+    CFRetain(_surface);
+    CGDataProviderRef provider = CGDataProviderCreateWithData(
+        _surface, IOSurfaceGetBaseAddress(_surface),
+        IOSurfaceGetAllocSize(_surface),
+        [](void *surface, const void *, size_t) {
+          auto *locked = static_cast<IOSurfaceRef>(surface);
+          IOSurfaceUnlock(locked, kIOSurfaceLockReadOnly, nullptr);
+          CFRelease(locked);
+        });
+    if (provider == nullptr) {
+      IOSurfaceUnlock(_surface, kIOSurfaceLockReadOnly, nullptr);
+      CFRelease(_surface);
+      return nullptr;
+    }
+    CGColorSpaceRef colorSpace = CGColorSpaceCreateWithName(
+        _displayP3 ? kCGColorSpaceDisplayP3 : kCGColorSpaceSRGB);
+    // Premultiplied BGRA, the surface's byte order.
+    CGImageRef image = CGImageCreate(
+        IOSurfaceGetWidth(_surface), IOSurfaceGetHeight(_surface), 8, 32,
+        IOSurfaceGetBytesPerRow(_surface), colorSpace,
+        static_cast<CGBitmapInfo>(kCGImageAlphaPremultipliedFirst) |
+            kCGBitmapByteOrder32Little,
+        provider, nullptr, false, kCGRenderingIntentDefault);
+    CGColorSpaceRelease(colorSpace);
+    CGDataProviderRelease(provider);
+    if (image == nullptr) {
+      return nullptr;
+    }
+    return std::make_shared<ApplePresentedBitmap>(image);
+  }
+
+private:
+  static MTLSharedEventListener *sharedEventListener() {
+    static MTLSharedEventListener *listener = [[MTLSharedEventListener alloc]
+        initWithDispatchQueue:dispatch_queue_create("RNSkia presented images",
+                                                    DISPATCH_QUEUE_SERIAL)];
+    return listener;
+  }
+
+  IOSurfaceRef _surface;
+  bool _displayP3;
+};
+
+} // namespace
+
+std::optional<PresentedTarget>
+RNSkApplePlatformContext::makePresentedTarget(const SkImageInfo &info) {
+  NSDictionary *properties = @{
+    (id)kIOSurfaceWidth : @(info.width()),
+    (id)kIOSurfaceHeight : @(info.height()),
+    (id)kIOSurfaceBytesPerElement : @4,
+    (id)kIOSurfacePixelFormat : @(kCVPixelFormatType_32BGRA),
+  };
+  IOSurfaceRef surface = IOSurfaceCreate((__bridge CFDictionaryRef)properties);
+  if (surface == nullptr) {
+    return std::nullopt;
+  }
+  // The image is drawn in sRGB or Display P3 (see
+  // RNSkPresentedImages::presentedInfo).
+  const bool displayP3 =
+      info.colorSpace() != nullptr && !info.colorSpace()->isSRGB();
+  return PresentedTarget(std::unique_ptr<PresentedBuffer>(
+      std::make_unique<ApplePresentedBuffer>(surface, displayP3)));
+}
+
+void RNSkApplePlatformContext::discardPresentedBitmap(uint32_t id) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    [SkiaPresentedImages discardImageForId:id];
+  });
+}
+
+void RNSkApplePlatformContext::presentFailure(uint32_t id) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    [SkiaPresentedImages failImageForId:id];
   });
 }
 

@@ -8,6 +8,20 @@ import {
 } from "./ClippedSubviews";
 import { GraphitePendingFrames } from "./GraphitePendingFrames";
 import { GraphiteView, GraphiteViewTransform } from "./GraphiteView";
+import {
+  CanvasAboveImageView,
+  ImageView,
+  ImageViewInset,
+  ImageViewRounded,
+  ImageViewRoundedBorder,
+  ImageViewRoundedShadow,
+} from "./ImageView";
+import { ImageViewMinified, ImageViewMinifiedOdd } from "./ImageViewMinified";
+import {
+  ImageViewOversized,
+  ImageViewOversizedWhole,
+} from "./ImageViewOversized";
+import { ImageViewWide } from "./ImageViewWide";
 import { IsOnMainThread } from "./IsOnMainThread";
 import { OnLayout } from "./OnLayout";
 import { ResizeGrow, ResizeShrink } from "./Resize";
@@ -28,6 +42,7 @@ const settling = (component: FC): Screen => ({
 });
 
 export const Screens: Readonly<Record<string, Screen>> = {
+  CanvasAboveImageView: shown(CanvasAboveImageView),
   ClippedSubviewsBack: settling(ClippedSubviewsBack),
   ClippedSubviewsSharedValueChanged: settling(
     ClippedSubviewsSharedValueChanged
@@ -37,6 +52,16 @@ export const Screens: Readonly<Record<string, Screen>> = {
   GraphitePendingFrames: settling(GraphitePendingFrames),
   GraphiteView: shown(GraphiteView),
   GraphiteViewTransform: shown(GraphiteViewTransform),
+  ImageView: shown(ImageView),
+  ImageViewMinified: shown(ImageViewMinified),
+  ImageViewMinifiedOdd: shown(ImageViewMinifiedOdd),
+  ImageViewOversized: shown(ImageViewOversized),
+  ImageViewOversizedWhole: shown(ImageViewOversizedWhole),
+  ImageViewInset: shown(ImageViewInset),
+  ImageViewRounded: shown(ImageViewRounded),
+  ImageViewRoundedBorder: shown(ImageViewRoundedBorder),
+  ImageViewRoundedShadow: shown(ImageViewRoundedShadow),
+  ImageViewWide: shown(ImageViewWide),
   IsOnMainThread: shown(IsOnMainThread),
   OnLayout: shown(OnLayout),
   ResizeGrow: shown(ResizeGrow),

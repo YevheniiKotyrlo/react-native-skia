@@ -9,6 +9,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -289,11 +290,25 @@ public:
    */
   void readPixels(const sk_sp<SkImage> &image, const SkIRect &srcRect,
                   std::function<void(ReadResult)> callback) {
+    readPixels(image, srcRect,
+               image->imageInfo().makeDimensions(srcRect.size()),
+               std::move(callback));
+  }
+
+  /**
+   Same as readPixels(), into `info`: a color type, alpha type or color space
+   of the caller's rather than the image's, and the size of `srcRect` or a
+   smaller one, which the GPU scales the pixels down to by repeated halving.
+   The callback runs under the context's lock, where the result's rows stay
+   the device's until it returns.
+   */
+  void readPixels(const sk_sp<SkImage> &image, const SkIRect &srcRect,
+                  const SkImageInfo &info,
+                  std::function<void(ReadResult)> callback) {
     struct Request {
       std::function<void(ReadResult)> callback;
       std::shared_ptr<std::atomic<bool>> delivered;
     };
-    auto info = image->imageInfo().makeDimensions(srcRect.size());
     Readback readback;
     {
       std::unique_lock<std::mutex> lock(_mutex);
@@ -312,7 +327,8 @@ public:
       auto *request = new Request{std::move(callback), readback.delivered};
       current->context->asyncRescaleAndReadPixels(
           image.get(), info, srcRect, SkImage::RescaleGamma::kSrc,
-          SkImage::RescaleMode::kNearest,
+          // Graphite ignores the mode when `info` has the size of `srcRect`.
+          SkImage::RescaleMode::kRepeatedLinear,
           [](void *context, ReadResult result) {
             auto *request = static_cast<Request *>(context);
             request->callback(std::move(result));
@@ -675,7 +691,9 @@ public:
   // The texture must have RenderAttachment usage; give it TextureBinding too
   // to sample it from WebGPU (e.g. as a three.js texture) after each flush.
   // The surface retains the texture for its lifetime.
-  sk_sp<SkSurface> MakeSurfaceFromTexture(wgpu::Texture texture) {
+  sk_sp<SkSurface>
+  MakeSurfaceFromTexture(wgpu::Texture texture,
+                         sk_sp<SkColorSpace> colorSpace = nullptr) {
     if (!texture) {
       return nullptr;
     }
@@ -694,8 +712,7 @@ public:
 
     // The color type is derived from the texture format.
     return SkSurfaces::WrapBackendTexture(
-        getRecorder(), backendTexture,
-        nullptr, // colorspace
+        getRecorder(), backendTexture, std::move(colorSpace),
         nullptr, // surfaceProps
         [](void *context) {
           auto ref = static_cast<TextureRef *>(context);
@@ -704,6 +721,80 @@ public:
         textureRef);
   }
 
+  /** The fences a drawing into shared texture memory exported, with the values
+   * they reach. */
+  struct SharedTextureFences {
+    std::vector<wgpu::SharedFence> fences;
+    std::vector<uint64_t> signaledValues;
+  };
+
+  /**
+   Draws into a texture of `memory` of `size`, in `colorSpace`, with `draw`,
+   and gives back the fences its end of access exported: the memory holds
+   the drawing once they signal. nullopt when nothing was drawn: an import
+   that failed, a lost device, a recording Graphite refused. Called on the
+   thread whose recorder records the drawing (see getRecorder).
+   */
+  std::optional<SharedTextureFences>
+  drawIntoSharedTexture(const wgpu::SharedTextureMemory &memory, SkISize size,
+                        sk_sp<SkColorSpace> colorSpace,
+                        const std::function<void(SkCanvas *)> &draw) {
+    wgpu::SharedTextureMemoryProperties properties{};
+    if (memory == nullptr ||
+        memory.GetProperties(&properties) != wgpu::Status::Success ||
+        !(properties.usage & wgpu::TextureUsage::RenderAttachment) ||
+        !(properties.usage & wgpu::TextureUsage::TextureBinding)) {
+      return std::nullopt;
+    }
+    wgpu::TextureDescriptor descriptor{};
+    descriptor.format = properties.format;
+    descriptor.usage = wgpu::TextureUsage::RenderAttachment |
+                       wgpu::TextureUsage::TextureBinding;
+    descriptor.size = {static_cast<uint32_t>(size.width()),
+                       static_cast<uint32_t>(size.height()), 1};
+    auto texture = memory.CreateTexture(&descriptor);
+    wgpu::SharedTextureMemoryBeginAccessDescriptor begin{};
+#ifdef __ANDROID__
+    wgpu::SharedTextureMemoryVkImageLayoutBeginState beginLayout{};
+    begin.nextInChain = &beginLayout;
+#endif
+    if (texture == nullptr ||
+        memory.BeginAccess(texture, &begin) != wgpu::Status::Success) {
+      return std::nullopt;
+    }
+    bool drawn = false;
+    {
+      auto surface = MakeSurfaceFromTexture(texture, std::move(colorSpace));
+      if (surface != nullptr) {
+        draw(surface->getCanvas());
+        drawn = submitRecording(getRecorder());
+      }
+    }
+    wgpu::SharedTextureMemoryEndAccessState end{};
+#ifdef __ANDROID__
+    wgpu::SharedTextureMemoryVkImageLayoutEndState endLayout{};
+    end.nextInChain = &endLayout;
+#endif
+    if (memory.EndAccess(texture, &end) != wgpu::Status::Success || !drawn) {
+      return std::nullopt;
+    }
+    SharedTextureFences fences;
+    for (size_t i = 0; i < end.fenceCount; i++) {
+      fences.fences.push_back(end.fences[i]);
+      fences.signaledValues.push_back(
+          i < end.signaledValueCount ? end.signaledValues[i] : 0);
+    }
+    return fences;
+  }
+
+  /** The largest width or height a texture of the device in use can have. */
+  uint32_t getMaxTextureDimension2D() {
+    wgpu::Limits limits{};
+    if (getWGPUDevice().GetLimits(&limits) != wgpu::Status::Success) {
+      return 0;
+    }
+    return limits.maxTextureDimension2D;
+  }
   // Create a WebGPU texture from an SkImage
   // Returns a texture with CopySrc and TextureBinding usage
   wgpu::Texture MakeTextureFromImage(sk_sp<SkImage> image) {
